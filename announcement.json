@@ -2,7 +2,7 @@
 "enabled": true,
 "level": "warning",
 "title": "THÔNG BÁO HỆ THỐNG",
-"message": "⚠️ Hệ thống sẽ bảo trì từ 18:00 đến 19:00. Vui lòng hoàn tất việc scan trước thời gian này.",
+"message": "⚠️ Hệ thống sẽ bảo trì từ 18:00 đến 19:00.",
 "updatedAt": "2026-06-09 18:00:00",
 
 "autoHideSeconds": 0,
