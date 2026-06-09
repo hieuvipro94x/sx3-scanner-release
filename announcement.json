@@ -1,8 +1,8 @@
 {
   "enabled": true,
-  "title": "SCAN SẢN XUẤT",
-  "message": "Chú ý đảm bảo chất lượng đang sảy ra rất nhiêu lỗi!!! ",
-  "updatedAt": "2026-06-09 20:32:10",
+  "title": "SẢN XUẤT 3 VUI LÒNG CHÚ Y",
+  "message": "ĐANG SẢY RA RẤT NHIỀU HÀNG LỖI MONG MỌI NGƯỜI TẬP CHUNG KIỂM TRA KỸ HÀNG TRƯỚC KHI ĐÓNG GÓI.XIN CẢM ƠN",
+  "updatedAt": "2026-06-09 20:37:10",
   "pollSeconds": 10,
-  "autoHideSeconds": 30,
+  "autoHideSeconds": 60,
 }
