@@ -1,17 +1,17 @@
 {
 "enabled": true,
 "level": "",
-"title": "THÔNG BÁO HỆ THỐNG",
-"message": "Hệ thống sẽ bảo trì từ 18:00 đến 19:00.",
+"title": "THÔNG BÁO",
+"message": "📢 Chào mừng sử dụng SX3 Scanner Nếu có vấn đề gi cần giải quyết gặp Hà ĐT nhé !!!.",
 "updatedAt": "2026-06-09 18:00:00",
 
-"autoHideSeconds": 60,
+"autoHideSeconds": 300,
 "pollSeconds": 30,
 
 "showPopup": false,
 "allowClose": true,
 
-"version": "6.2.0",
+"version": "6.2.1",
 "forceUpdate": false,
 
 "priority": 5,
