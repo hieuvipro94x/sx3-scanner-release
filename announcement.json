@@ -1,8 +1,8 @@
 {
 "enabled": true,
-"level": "info",
+"level": "warning",
 "title": "THÔNG BÁO",
-"message": "Quản lý QC ĐINH THỊ HÀ.",
+"message": "Quản lý QC ĐINH THỊ HÀ ĐÂY LÀ 1 THÔNG BÁO QUAN TRONG.",
 
 "updatedAt": "2026-06-09 18:00:00",
 
