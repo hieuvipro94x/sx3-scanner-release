@@ -1,63 +1,110 @@
 {
-"enabled": true,
-"mode": "playlist",
-"updatedAt": "2026-06-10 17:30:00",
+  "enabled": true,
+  "mode": "playlist",
+  "updatedAt": "2026-06-10 17:30:00",
 
-"pollSeconds": 15,
-"rotateSeconds": 15,
-"repeatSeconds": 15,
+  "pollSeconds": 15,
+  "rotateSeconds": 35,
+  "repeatSeconds": 35,
 
-"autoHideSeconds": 0,
-"showCountdown": false,
-"showPopup": false,
-"allowClose": false,
+  "autoHideSeconds": 0,
+  "showCountdown": false,
+  "showPopup": false,
+  "allowClose": false,
 
-"marqueeEnabled": true,
-"marqueeDirection": "rightToLeft",
-"marqueeSpeed": 80,
+  "marqueeEnabled": true,
+  "marqueeDirection": "rightToLeft",
+  "marqueeSpeed": 40,
 
-"version": "6.8.0",
-"forceUpdate": false,
+  "version": "6.8.0",
+  "forceUpdate": false,
 
-"priority": 10,
+  "priority": 10,
 
-"backgroundColor": "#0D47A1",
-"foregroundColor": "#FFFFFF",
+  "backgroundColor": "#0D47A1",
+  "foregroundColor": "#FFFFFF",
 
-"createdBy": "ADMIN",
+  "createdBy": "ADMIN",
 
-"messages": [
-{
-"level": "info",
-"title": "THÔNG BÁO SẢN XUẤT",
-"message": "📢 Thực hiện đúng hướng dẫn thao tác chuẩn và kiểm tra sản phẩm trước khi chuyển công đoạn.",
-"backgroundColor": "#1565C0",
-"foregroundColor": "#FFFFFF"
-},
+  "messages": [
+    {
+      "level": "info",
+      "title": "THÔNG BÁO SẢN XUẤT",
+      "message": "📢 Thực hiện đúng hướng dẫn thao tác chuẩn và kiểm tra sản phẩm trước khi chuyển công đoạn.",
+      "backgroundColor": "#1565C0",
+      "foregroundColor": "#FFFFFF"
+    },
 
-{
-  "level": "warning",
-  "title": "KIỂM TRA QR CODE",
-  "message": "🔍 Đối chiếu chính xác QR Code với mã hàng thực tế trước khi scan.",
-  "backgroundColor": "#C62828",
-  "foregroundColor": "#FFFFFF"
-},
+    {
+      "level": "warning",
+      "title": "KIỂM TRA QR CODE",
+      "message": "🔍 Đối chiếu chính xác QR Code với mã hàng thực tế trước khi scan.",
+      "backgroundColor": "#C62828",
+      "foregroundColor": "#FFFFFF"
+    },
 
-{
-  "level": "success",
-  "title": "XÁC NHẬN THÔNG TIN",
-  "message": "✅ Kiểm tra mã hàng, model, phiên bản và số lượng trước khi đóng gói.",
-  "backgroundColor": "#2E7D32",
-  "foregroundColor": "#FFFFFF"
-},
+    {
+      "level": "success",
+      "title": "XÁC NHẬN THÔNG TIN",
+      "message": "✅ Kiểm tra mã hàng, model, phiên bản và số lượng trước khi đóng gói.",
+      "backgroundColor": "#2E7D32",
+      "foregroundColor": "#FFFFFF"
+    },
 
-{
-  "level": "warning",
-  "title": "AN TOÀN LAO ĐỘNG",
-  "message": "🦺 Luôn sử dụng đầy đủ bảo hộ lao động và tuân thủ quy trình an toàn.",
-  "backgroundColor": "#EF6C00",
-  "foregroundColor": "#FFFFFF"
-}
+    {
+      "level": "warning",
+      "title": "AN TOÀN LAO ĐỘNG",
+      "message": "🦺 Luôn sử dụng đầy đủ bảo hộ lao động và tuân thủ quy trình an toàn.",
+      "backgroundColor": "#EF6C00",
+      "foregroundColor": "#FFFFFF"
+    },
 
-]
+    {
+      "level": "error",
+      "title": "NGHIÊM CẤM BỎ QUA CÔNG ĐOẠN",
+      "message": "⛔ Mọi công đoạn kiểm tra bắt buộc phải được thực hiện đầy đủ trước khi xuất hàng.",
+      "backgroundColor": "#B71C1C",
+      "foregroundColor": "#FFFFFF"
+    },
+
+    {
+      "level": "info",
+      "title": "5S KHU VỰC LÀM VIỆC",
+      "message": "🧹 Duy trì khu vực làm việc sạch sẽ, ngăn nắp và đúng tiêu chuẩn 5S.",
+      "backgroundColor": "#6A1B9A",
+      "foregroundColor": "#FFFFFF"
+    },
+
+    {
+      "level": "warning",
+      "title": "PHÒNG NGỪA LỖI",
+      "message": "⚠️ Khi phát hiện bất thường phải báo ngay cho tổ trưởng hoặc QC để xử lý.",
+      "backgroundColor": "#F57C00",
+      "foregroundColor": "#FFFFFF"
+    },
+
+    {
+      "level": "success",
+      "title": "CHẤT LƯỢNG LÀ ƯU TIÊN",
+      "message": "🏆 Làm đúng ngay từ đầu để giảm lỗi, giảm tái công đoạn và nâng cao năng suất.",
+      "backgroundColor": "#00897B",
+      "foregroundColor": "#FFFFFF"
+    },
+
+    {
+      "level": "info",
+      "title": "TIẾT KIỆM VẬT TƯ",
+      "message": "💡 Sử dụng vật tư đúng định mức, tránh thất thoát và lãng phí.",
+      "backgroundColor": "#3949AB",
+      "foregroundColor": "#FFFFFF"
+    },
+
+    {
+      "level": "error",
+      "title": "DỪNG NGAY KHI PHÁT HIỆN LỖI",
+      "message": "🚨 Không tiếp tục sản xuất khi phát hiện lỗi nghiêm trọng chưa được xác nhận xử lý.",
+      "backgroundColor": "#D50000",
+      "foregroundColor": "#FFFFFF"
+    }
+  ]
 }
