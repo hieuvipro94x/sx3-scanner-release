@@ -1,5 +1,6 @@
 {
   "version": "6.9.0",
-  "downloadUrl": "https://github.com/hieuvipro94x/sx3-scanner-release/releases/download/v6.9.0/SX3ScannerSetup-6.9.0.exe",
-  "releaseNotes": "Cập nhật giao diện và sửa lỗi."
+  "tagName": "v6.9.0",
+  "downloadUrl": "https://github.com/hieuvipro94x/sx3-scanner-release/releases/download/v6.9.0/SX3ScannerSetup.exe",
+  "releaseNotes": "Cập nhật phiên bản 6.9.0"
 }
