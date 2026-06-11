@@ -37,6 +37,8 @@ namespace SX3_SCANER
                     initialize.EnsureCreate();
                 });
 
+                await AnnouncementServerBootstrapper.StartAnnouncementServer();
+
                 StartupManager.SetStatus("Đang tải cấu hình...");
                 MainWindow mainWindow = new MainWindow
                 {

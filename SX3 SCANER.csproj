@@ -130,6 +130,7 @@
     <Compile Include="AskPassword\AskPasswordWD.xaml.cs">
       <DependentUpon>AskPasswordWD.xaml</DependentUpon>
     </Compile>
+    <Compile Include="Helper\AnnouncementServerBootstrapper.cs" />
     <Compile Include="Helper\AppConfigHelper.cs" />
     <Compile Include="Helper\GitHubReleaseUpdateInfo.cs" />
     <Compile Include="Helper\GitHubReleaseUpdateService.cs" />
@@ -243,6 +244,14 @@
     <MakeDir Directories="$(TargetDir)x64" />
     <Copy SourceFiles="$(SQLiteStubDir)\x86\SQLite.Interop.dll" DestinationFiles="$(TargetDir)x86\SQLite.Interop.dll" SkipUnchangedFiles="true" Condition="Exists('$(SQLiteStubDir)\x86\SQLite.Interop.dll')" />
     <Copy SourceFiles="$(SQLiteStubDir)\x64\SQLite.Interop.dll" DestinationFiles="$(TargetDir)x64\SQLite.Interop.dll" SkipUnchangedFiles="true" Condition="Exists('$(SQLiteStubDir)\x64\SQLite.Interop.dll')" />
+  </Target>
+  <Target Name="PublishAnnouncementServer" AfterTargets="Build">
+    <PropertyGroup>
+      <AnnouncementServerProject>$(MSBuildProjectDirectory)\AnnouncementServer\SX3.AnnouncementServer.csproj</AnnouncementServerProject>
+      <AnnouncementServerArtifacts>$(BaseIntermediateOutputPath)AnnouncementServerArtifacts</AnnouncementServerArtifacts>
+      <AnnouncementServerPublishDir>$([System.String]::Copy('$(TargetDir)').TrimEnd('\'))</AnnouncementServerPublishDir>
+    </PropertyGroup>
+    <Exec Command="dotnet publish &quot;$(AnnouncementServerProject)&quot; --configuration $(Configuration) --framework net8.0 --artifacts-path &quot;$(AnnouncementServerArtifacts)&quot; --output &quot;$(AnnouncementServerPublishDir)&quot; --no-self-contained" />
   </Target>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>

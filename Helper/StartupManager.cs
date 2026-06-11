@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace SX3_SCANER.Helper
 {
@@ -10,6 +12,14 @@ namespace SX3_SCANER.Helper
         private static readonly object StatusSync = new object();
         private static readonly HashSet<string> LoggedKeys =
             new HashSet<string>(StringComparer.Ordinal);
+        private static readonly object LogSync = new object();
+        private static readonly string StartupLogPath = Path.Combine(
+            Environment.GetFolderPath(
+                Environment.SpecialFolder.CommonApplicationData),
+            "JBZVN",
+            "SX3 Scanner",
+            "logs",
+            "startup.log");
         private static string _currentStatus = "Đang khởi động ứng dụng...";
 
         internal static event Action<string> StatusChanged;
@@ -101,6 +111,28 @@ namespace SX3_SCANER.Helper
         internal static void Log(string message)
         {
             Debug.WriteLine("[StartupManager] " + message);
+
+            try
+            {
+                lock (LogSync)
+                {
+                    string directory = Path.GetDirectoryName(StartupLogPath);
+                    if (!string.IsNullOrEmpty(directory))
+                        Directory.CreateDirectory(directory);
+
+                    File.AppendAllText(
+                        StartupLogPath,
+                        DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff") +
+                        " [StartupManager] " +
+                        (message ?? string.Empty) +
+                        Environment.NewLine,
+                        new UTF8Encoding(false));
+                }
+            }
+            catch
+            {
+                // Logging must never prevent the application from starting.
+            }
         }
 
         internal static void LogOnce(string key, string message)

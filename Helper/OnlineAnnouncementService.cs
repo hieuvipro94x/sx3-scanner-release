@@ -74,8 +74,8 @@ namespace SX3_SCANER.Helper
 
             _isStarted = true;
             await LoadCachedAnnouncementAsync();
-            await LoadSnapshotAsync();
             _ = RunRealtimeLoopAsync(_lifetimeCts.Token);
+            await LoadSnapshotAsync();
         }
 
         private async Task RunRealtimeLoopAsync(CancellationToken token)
@@ -90,14 +90,15 @@ namespace SX3_SCANER.Helper
                     {
                         socket.Options.KeepAliveInterval =
                             TimeSpan.FromSeconds(20);
+                        StartupManager.Log(
+                            "[Announcement] Connecting realtime...");
                         await socket.ConnectAsync(
                             new Uri(_realtimeUrl),
                             token).ConfigureAwait(false);
 
                         retrySeconds = 1;
                         StartupManager.Log(
-                            "[Announcement] Realtime connected: " +
-                            _realtimeUrl);
+                            "[Announcement] Realtime connected.");
 
                         while (socket.State == WebSocketState.Open &&
                                !token.IsCancellationRequested)

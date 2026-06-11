@@ -4,12 +4,14 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Threading.Channels;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls(
     builder.Configuration["AnnouncementServer:Urls"] ??
     "http://0.0.0.0:5088");
 builder.Services.AddSingleton<AnnouncementBroker>();
+builder.Services.AddHostedService<AnnouncementFileWatcherService>();
 
 var app = builder.Build();
 app.UseWebSockets(new WebSocketOptions
@@ -25,6 +27,11 @@ app.MapGet("/health", () => Results.Ok(new
 
 app.MapGet(
     "/api/announcements/current",
+    (AnnouncementBroker broker) =>
+        Results.Text(broker.CurrentJson, "application/json", Encoding.UTF8));
+
+app.MapGet(
+    "/api/announcements",
     (AnnouncementBroker broker) =>
         Results.Text(broker.CurrentJson, "application/json", Encoding.UTF8));
 
@@ -134,26 +141,42 @@ static bool TokensEqual(string actual, string expected)
 internal sealed class AnnouncementBroker
 {
     private const int MaximumAnnouncementBytes = 256 * 1024;
-    private readonly ConcurrentDictionary<Guid, WebSocket> _clients = new();
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+    private readonly ConcurrentDictionary<Guid, AnnouncementClient> _clients =
+        new();
+    private readonly ILogger<AnnouncementBroker> _logger;
     private readonly SemaphoreSlim _publishLock = new(1, 1);
     private readonly string _announcementPath;
     private string _currentJson;
 
-    public AnnouncementBroker(IWebHostEnvironment environment)
+    public AnnouncementBroker(
+        IWebHostEnvironment environment,
+        ILogger<AnnouncementBroker> logger)
     {
+        _logger = logger;
         _announcementPath = Path.Combine(
             environment.ContentRootPath,
             "announcement.json");
 
         string initialJson = File.Exists(_announcementPath)
-            ? File.ReadAllText(_announcementPath, Encoding.UTF8)
+            ? File.ReadAllText(_announcementPath, StrictUtf8)
             : "{\"enabled\":false,\"mode\":\"single\",\"message\":\"\"}";
         _currentJson = ValidateAndNormalize(initialJson);
-        File.WriteAllText(
-            _announcementPath,
-            _currentJson,
-            new UTF8Encoding(false));
+
+        if (!File.Exists(_announcementPath))
+        {
+            File.WriteAllText(
+                _announcementPath,
+                _currentJson,
+                new UTF8Encoding(false));
+        }
+
+        _logger.LogInformation(
+            "Loaded announcement snapshot from {AnnouncementPath}.",
+            _announcementPath);
     }
+
+    public string AnnouncementPath => _announcementPath;
 
     public string CurrentJson => Volatile.Read(ref _currentJson);
 
@@ -164,11 +187,21 @@ internal sealed class AnnouncementBroker
         CancellationToken token)
     {
         Guid clientId = Guid.NewGuid();
-        _clients[clientId] = socket;
+        var client = new AnnouncementClient(socket);
 
         try
         {
-            await SendAsync(socket, CurrentJson, token);
+            await _publishLock.WaitAsync(token);
+            try
+            {
+                _clients[clientId] = client;
+                await client.SendAsync(CurrentJson, token);
+            }
+            finally
+            {
+                _publishLock.Release();
+            }
+
             var buffer = new byte[1024];
 
             while (socket.State == WebSocketState.Open &&
@@ -212,21 +245,36 @@ internal sealed class AnnouncementBroker
         await _publishLock.WaitAsync(token);
         try
         {
-            string tempPath = _announcementPath + ".tmp";
-            await File.WriteAllTextAsync(
-                tempPath,
-                json,
-                new UTF8Encoding(false),
-                token);
-            File.Move(tempPath, _announcementPath, overwrite: true);
+            await WriteAtomicallyAsync(json, token);
             Volatile.Write(ref _currentJson, json);
+            await BroadcastAsync(json);
         }
         finally
         {
             _publishLock.Release();
         }
+    }
 
-        await BroadcastAsync(json, token);
+    public async Task<bool> ReloadFromDiskAsync(CancellationToken token)
+    {
+        await _publishLock.WaitAsync(token);
+        try
+        {
+            string json = await ReadAndValidateWithRetryAsync(token);
+            if (string.Equals(json, CurrentJson, StringComparison.Ordinal))
+                return false;
+
+            Volatile.Write(ref _currentJson, json);
+            await BroadcastAsync(json);
+            _logger.LogInformation(
+                "Reloaded and broadcast announcement file {AnnouncementPath}.",
+                _announcementPath);
+            return true;
+        }
+        finally
+        {
+            _publishLock.Release();
+        }
     }
 
     public static string ValidateAndNormalize(string json)
@@ -298,39 +346,297 @@ internal sealed class AnnouncementBroker
             marker => value.Contains(marker, StringComparison.Ordinal));
     }
 
-    private async Task BroadcastAsync(string json, CancellationToken token)
+    private async Task<string> ReadAndValidateWithRetryAsync(
+        CancellationToken token)
     {
-        foreach (KeyValuePair<Guid, WebSocket> client in _clients.ToArray())
+        const int maximumAttempts = 6;
+        Exception? lastError = null;
+
+        for (int attempt = 1; attempt <= maximumAttempts; attempt++)
         {
             try
             {
-                await SendAsync(client.Value, json, token);
+                await using var stream = new FileStream(
+                    _announcementPath,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete,
+                    bufferSize: 8192,
+                    options: FileOptions.Asynchronous |
+                             FileOptions.SequentialScan);
+
+                if (stream.Length > MaximumAnnouncementBytes)
+                    throw new InvalidDataException(
+                        "Announcement JSON is too large.");
+
+                using var reader = new StreamReader(
+                    stream,
+                    StrictUtf8,
+                    detectEncodingFromByteOrderMarks: true,
+                    bufferSize: 8192,
+                    leaveOpen: false);
+                string json = await reader.ReadToEndAsync(token);
+                return ValidateAndNormalize(json);
             }
-            catch
+            catch (Exception ex) when (
+                ex is IOException or
+                UnauthorizedAccessException or
+                JsonException or
+                InvalidDataException or
+                DecoderFallbackException)
             {
-                _clients.TryRemove(client.Key, out _);
-                try
-                {
-                    client.Value.Abort();
-                    client.Value.Dispose();
-                }
-                catch
-                {
-                }
+                lastError = ex;
+                if (attempt == maximumAttempts)
+                    break;
+
+                await Task.Delay(
+                    TimeSpan.FromMilliseconds(100 * attempt),
+                    token);
+            }
+        }
+
+        throw new InvalidDataException(
+            $"Could not load a valid announcement file after {maximumAttempts} attempts.",
+            lastError);
+    }
+
+    private async Task WriteAtomicallyAsync(
+        string json,
+        CancellationToken token)
+    {
+        string tempPath = Path.Combine(
+            Path.GetDirectoryName(_announcementPath)!,
+            $".{Path.GetFileName(_announcementPath)}.{Guid.NewGuid():N}.tmp");
+
+        try
+        {
+            await File.WriteAllTextAsync(
+                tempPath,
+                json,
+                new UTF8Encoding(false),
+                token);
+            File.Move(tempPath, _announcementPath, overwrite: true);
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(tempPath);
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
             }
         }
     }
 
-    private static Task SendAsync(
-        WebSocket socket,
+    private async Task BroadcastAsync(string json)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        Task[] sends = _clients
+            .ToArray()
+            .Select(client => SendToClientAsync(client, json, timeout.Token))
+            .ToArray();
+        await Task.WhenAll(sends);
+    }
+
+    private async Task SendToClientAsync(
+        KeyValuePair<Guid, AnnouncementClient> client,
         string json,
         CancellationToken token)
     {
-        byte[] payload = Encoding.UTF8.GetBytes(json);
-        return socket.SendAsync(
-            new ArraySegment<byte>(payload),
-            WebSocketMessageType.Text,
-            endOfMessage: true,
-            cancellationToken: token);
+        try
+        {
+            await client.Value.SendAsync(json, token);
+        }
+        catch (Exception ex) when (
+            ex is WebSocketException or
+            OperationCanceledException or
+            ObjectDisposedException or
+            InvalidOperationException)
+        {
+            _clients.TryRemove(client.Key, out _);
+            try
+            {
+                client.Value.Socket.Abort();
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private sealed class AnnouncementClient
+    {
+        private readonly SemaphoreSlim _sendLock = new(1, 1);
+
+        public AnnouncementClient(WebSocket socket)
+        {
+            Socket = socket;
+        }
+
+        public WebSocket Socket { get; }
+
+        public async Task SendAsync(string json, CancellationToken token)
+        {
+            await _sendLock.WaitAsync(token);
+            try
+            {
+                if (Socket.State != WebSocketState.Open)
+                    throw new WebSocketException(
+                        WebSocketError.InvalidState,
+                        "The WebSocket is not open.");
+
+                byte[] payload = Encoding.UTF8.GetBytes(json);
+                await Socket.SendAsync(
+                    new ArraySegment<byte>(payload),
+                    WebSocketMessageType.Text,
+                    endOfMessage: true,
+                    cancellationToken: token);
+            }
+            finally
+            {
+                _sendLock.Release();
+            }
+        }
+    }
+}
+
+internal sealed class AnnouncementFileWatcherService : BackgroundService
+{
+    private static readonly TimeSpan DebounceDelay =
+        TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan SafetyPollInterval =
+        TimeSpan.FromSeconds(30);
+
+    private readonly AnnouncementBroker _broker;
+    private readonly ILogger<AnnouncementFileWatcherService> _logger;
+    private readonly Channel<bool> _reloadSignals =
+        Channel.CreateBounded<bool>(new BoundedChannelOptions(1)
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.DropWrite
+        });
+
+    public AnnouncementFileWatcherService(
+        AnnouncementBroker broker,
+        ILogger<AnnouncementFileWatcherService> logger)
+    {
+        _broker = broker;
+        _logger = logger;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        string directory = Path.GetDirectoryName(_broker.AnnouncementPath)!;
+        string fileName = Path.GetFileName(_broker.AnnouncementPath);
+
+        using var watcher = new FileSystemWatcher(directory, fileName)
+        {
+            IncludeSubdirectories = false,
+            NotifyFilter = NotifyFilters.FileName |
+                           NotifyFilters.LastWrite |
+                           NotifyFilters.CreationTime |
+                           NotifyFilters.Size
+        };
+
+        FileSystemEventHandler onChanged = (_, _) => SignalReload();
+        RenamedEventHandler onRenamed = (_, args) =>
+        {
+            if (string.Equals(
+                    args.Name,
+                    fileName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                SignalReload();
+            }
+        };
+        ErrorEventHandler onError = (_, args) =>
+        {
+            _logger.LogWarning(
+                args.GetException(),
+                "Announcement file watcher reported an error; the safety poll remains active.");
+            SignalReload();
+        };
+
+        watcher.Changed += onChanged;
+        watcher.Created += onChanged;
+        watcher.Renamed += onRenamed;
+        watcher.Error += onError;
+        watcher.EnableRaisingEvents = true;
+        SignalReload();
+
+        _logger.LogInformation(
+            "Watching {AnnouncementPath} for changes.",
+            _broker.AnnouncementPath);
+
+        Task pollTask = RunSafetyPollAsync(stoppingToken);
+        try
+        {
+            while (await _reloadSignals.Reader.WaitToReadAsync(stoppingToken))
+            {
+                while (_reloadSignals.Reader.TryRead(out _))
+                {
+                }
+
+                await Task.Delay(DebounceDelay, stoppingToken);
+                while (_reloadSignals.Reader.TryRead(out _))
+                {
+                }
+
+                try
+                {
+                    await _broker.ReloadFromDiskAsync(stoppingToken);
+                }
+                catch (OperationCanceledException)
+                    when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(
+                        ex,
+                        "Could not reload {AnnouncementPath}; the last valid snapshot remains active.",
+                        _broker.AnnouncementPath);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+            when (stoppingToken.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            watcher.EnableRaisingEvents = false;
+            watcher.Changed -= onChanged;
+            watcher.Created -= onChanged;
+            watcher.Renamed -= onRenamed;
+            watcher.Error -= onError;
+
+            try
+            {
+                await pollTask;
+            }
+            catch (OperationCanceledException)
+                when (stoppingToken.IsCancellationRequested)
+            {
+            }
+        }
+    }
+
+    private void SignalReload()
+    {
+        _reloadSignals.Writer.TryWrite(true);
+    }
+
+    private async Task RunSafetyPollAsync(CancellationToken token)
+    {
+        using var timer = new PeriodicTimer(SafetyPollInterval);
+        while (await timer.WaitForNextTickAsync(token))
+            SignalReload();
     }
 }
