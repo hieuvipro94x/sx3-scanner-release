@@ -22,28 +22,28 @@
     {
       "level": "info",
       "title": "THÔNG BÁO SẢN XUẤT",
-      "message": "THÔNG BÁO SẢN XUẤT: Thao tác hiện đang hướng dẫn thao tác chuẩn",
+      "message": "Vui lòng thực hiện đúng theo hướng dẫn thao tác chuẩn (SOP) đã được ban hành. Tuân thủ đầy đủ quy trình làm việc, kiểm tra kỹ từng công đoạn và báo ngay cho quản lý khi phát hiện bất thường để đảm bảo chất lượng sản phẩm.",
       "backgroundColor": "#1565C0",
       "foregroundColor": "#FFFFFF"
     },
     {
       "level": "warning",
       "title": "KIỂM TRA QR CODE",
-      "message": "Đối chiếu chính xác QR Code với mã hàng thực tế trước khi scan.",
+      "message": "Trước khi thực hiện quét mã, bắt buộc đối chiếu chính xác QR Code với mã hàng, model và phiên bản thực tế. Không scan khi có dấu hiệu sai lệch thông tin nhằm tránh nhầm lẫn và phát sinh lỗi trong quá trình sản xuất.",
       "backgroundColor": "#C62828",
       "foregroundColor": "#FFFFFF"
     },
     {
       "level": "success",
-      "title": "XÁC NHẬN THÔNG TIN",
-      "message": "Kiểm tra mã hàng, model, phiên bản và số lượng trước khi đóng gói.",
+      "title": "XÁC NHẬN THÔNG TIN ĐÓNG GÓI",
+      "message": "Kiểm tra đầy đủ mã hàng, model, phiên bản, số lượng, phụ kiện đi kèm và tình trạng ngoại quan sản phẩm trước khi đóng gói. Đảm bảo tất cả thông tin khớp với lệnh sản xuất và tiêu chuẩn chất lượng hiện hành.",
       "backgroundColor": "#2E7D32",
       "foregroundColor": "#FFFFFF"
     },
     {
       "level": "warning",
       "title": "AN TOÀN LAO ĐỘNG",
-      "message": "Luôn sử dụng đầy đủ bảo hộ lao động và tuân thủ quy trình an toàn.",
+      "message": "Luôn sử dụng đầy đủ trang bị bảo hộ lao động theo quy định. Tuân thủ nghiêm ngặt các quy trình an toàn, giữ khu vực làm việc gọn gàng, sạch sẽ và báo cáo ngay các nguy cơ mất an toàn để phòng ngừa tai nạn lao động.",
       "backgroundColor": "#EF6C00",
       "foregroundColor": "#FFFFFF"
     }
