@@ -240,6 +240,7 @@ namespace SX3_SCANER.ViewModel
                     StringComparison.OrdinalIgnoreCase) &&
                 scannedAt - _lastScannedAt <= DuplicateScanWindow)
             {
+                ScanSoundService.PlayNg();
                 MessageBox.Show(
                     "Tem này vừa được scanner gửi lại. Không thêm vào thùng.",
                     "SCAN LẶP QUÁ NHANH",
@@ -275,6 +276,7 @@ namespace SX3_SCANER.ViewModel
 
             if (SelectedQuantity > 0 && CurrentScanProgress >= SelectedQuantity)
             {
+                ScanSoundService.PlayNg();
                 MessageBox.Show(
                     "Thùng đã đủ số lượng. Vui lòng xác nhận đóng thùng trước khi scan tiếp.",
                     "THÙNG ĐÃ ĐỦ",
@@ -438,6 +440,7 @@ namespace SX3_SCANER.ViewModel
                     "LOI LUU DATABASE",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
+                ScanSoundService.PlayNg();
                 if (allocatedBoxName)
                 {
                     _CurrentBoxName = null;
@@ -454,6 +457,7 @@ namespace SX3_SCANER.ViewModel
             ScanTextResult = isPass ? OK : NG;
             if (isPass)
             {
+                ScanSoundService.PlayOk();
                 InputScanCode = string.Empty;
             }
             else
@@ -755,6 +759,7 @@ namespace SX3_SCANER.ViewModel
             if (error == null)
                 return;
 
+            ScanSoundService.PlayNg();
             try
             {
                 var dialog = new ScanErrorWD(

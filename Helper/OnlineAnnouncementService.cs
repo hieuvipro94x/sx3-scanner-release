@@ -26,9 +26,11 @@ namespace SX3_SCANER.Helper
         }
 
         private const string DefaultRealtimeUrl =
-            "ws://127.0.0.1:5088/ws/announcements";
+            "ws://127.0.0.1:5055/ws/announcements";
         private const string DefaultSnapshotUrl =
-            "https://raw.githubusercontent.com/hieuvipro94x/sx3-scanner-release/main/announcement.json";
+            "http://127.0.0.1:5055/api/announcements/current";
+        private static readonly TimeSpan ReconnectDelay =
+            TimeSpan.FromSeconds(5);
 
         private readonly HttpClient _httpClient;
         private readonly Dispatcher _dispatcher;
@@ -40,13 +42,14 @@ namespace SX3_SCANER.Helper
         private bool _isStarted;
         private bool _isDisposed;
         private string _lastAnnouncementFingerprint;
-        private DateTime _lastSnapshotAttemptUtc = DateTime.MinValue;
-        private static readonly TimeSpan SnapshotFallbackInterval =
-            TimeSpan.FromSeconds(15);
+        private string _lastAnnouncementVersion = string.Empty;
+        private string _lastAnnouncementUpdatedAt = string.Empty;
+        private bool? _lastAnnouncementEnabled;
 
         public OnlineAnnouncementService()
         {
-            _dispatcher = Dispatcher.CurrentDispatcher;
+            _dispatcher = System.Windows.Application.Current?.Dispatcher ??
+                Dispatcher.CurrentDispatcher;
             _realtimeUrl = ReadSetting(
                 "AnnouncementRealtimeUrl",
                 DefaultRealtimeUrl);
@@ -69,25 +72,40 @@ namespace SX3_SCANER.Helper
 
         public event EventHandler<AnnouncementInfo> AnnouncementChanged;
 
-        public async void Start()
+        public void Start()
         {
             if (_isDisposed || _isStarted)
                 return;
 
             _isStarted = true;
-            await LoadCachedAnnouncementAsync();
-            _ = RunRealtimeLoopAsync(_lifetimeCts.Token);
-            await LoadSnapshotAsync();
+            _ = RunAsync(_lifetimeCts.Token);
+        }
+
+        private async Task RunAsync(CancellationToken token)
+        {
+            try
+            {
+                await LoadCachedAnnouncementAsync().ConfigureAwait(false);
+                await RunRealtimeLoopAsync(token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                StartupManager.Log(
+                    "[Announcement] Client loop stopped unexpectedly. " + ex);
+            }
         }
 
         private async Task RunRealtimeLoopAsync(CancellationToken token)
         {
-            int retrySeconds = 1;
-
             while (!token.IsCancellationRequested && !_isDisposed)
             {
                 try
                 {
+                    await LoadSnapshotAsync(token).ConfigureAwait(false);
+
                     using (var socket = new ClientWebSocket())
                     {
                         socket.Options.KeepAliveInterval =
@@ -98,9 +116,10 @@ namespace SX3_SCANER.Helper
                             new Uri(_realtimeUrl),
                             token).ConfigureAwait(false);
 
-                        retrySeconds = 1;
                         StartupManager.Log(
                             "[Announcement] Realtime connected.");
+
+                        await LoadSnapshotAsync(token).ConfigureAwait(false);
 
                         while (socket.State == WebSocketState.Open &&
                                !token.IsCancellationRequested)
@@ -135,15 +154,11 @@ namespace SX3_SCANER.Helper
 
                 try
                 {
-                    if (DateTime.UtcNow - _lastSnapshotAttemptUtc >=
-                        SnapshotFallbackInterval)
-                    {
-                        await LoadSnapshotAsync().ConfigureAwait(false);
-                    }
+                    StartupManager.Log(
+                        "[Announcement] Reconnecting in 5 seconds.");
                     await Task.Delay(
-                        TimeSpan.FromSeconds(retrySeconds),
+                        ReconnectDelay,
                         token).ConfigureAwait(false);
-                    retrySeconds = Math.Min(retrySeconds * 2, 60);
                 }
                 catch (OperationCanceledException)
                 {
@@ -176,12 +191,16 @@ namespace SX3_SCANER.Helper
             }
         }
 
-        public async Task LoadSnapshotAsync()
+        public Task LoadSnapshotAsync()
+        {
+            return LoadSnapshotAsync(_lifetimeCts.Token);
+        }
+
+        private async Task LoadSnapshotAsync(CancellationToken token)
         {
             if (_isDisposed || string.IsNullOrWhiteSpace(_snapshotUrl))
                 return;
 
-            _lastSnapshotAttemptUtc = DateTime.UtcNow;
             try
             {
                 string requestUrl = _snapshotUrl +
@@ -189,11 +208,16 @@ namespace SX3_SCANER.Helper
                     "t=" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
                 using (HttpResponseMessage response =
-                    await _httpClient.GetAsync(requestUrl)
+                    await _httpClient.GetAsync(requestUrl, token)
                         .ConfigureAwait(false))
                 {
                     if (!response.IsSuccessStatusCode)
+                    {
+                        StartupManager.Log(
+                            "[Announcement] Snapshot HTTP " +
+                            (int)response.StatusCode + " from " + _snapshotUrl);
                         return;
+                    }
 
                     byte[] bytes = await response.Content.ReadAsByteArrayAsync()
                         .ConfigureAwait(false);
@@ -210,10 +234,15 @@ namespace SX3_SCANER.Helper
                     }
                 }
             }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+            }
             catch (Exception ex)
             {
                 Debug.WriteLine(
                     "[Announcement] Snapshot unavailable: " + ex.Message);
+                StartupManager.Log(
+                    "[Announcement] Snapshot unavailable. " + ex.Message);
             }
         }
 
@@ -242,10 +271,7 @@ namespace SX3_SCANER.Helper
 
             string fingerprint = BuildFingerprint(json);
 
-            if (string.Equals(
-                _lastAnnouncementFingerprint,
-                fingerprint,
-                StringComparison.Ordinal))
+            if (!HasAnnouncementChanged(announcement, fingerprint))
             {
                 return false;
             }
@@ -271,9 +297,57 @@ namespace SX3_SCANER.Helper
                     return;
 
                 _lastAnnouncementFingerprint = fingerprint;
+                _lastAnnouncementVersion = announcement.Version;
+                _lastAnnouncementUpdatedAt = announcement.UpdatedAt;
+                _lastAnnouncementEnabled = announcement.Enabled;
+                StartupManager.Log(
+                    "[Announcement] Applied " +
+                    source.ToString().ToLowerInvariant() +
+                    " announcement. Enabled=" + announcement.Enabled +
+                    ", Version=" + announcement.Version +
+                    ", UpdatedAt=" + announcement.UpdatedAt);
                 AnnouncementChanged?.Invoke(this, announcement);
             }).Task.ConfigureAwait(false);
             return true;
+        }
+
+        private bool HasAnnouncementChanged(
+            AnnouncementInfo announcement,
+            string fingerprint)
+        {
+            if (!_lastAnnouncementEnabled.HasValue)
+                return true;
+
+            if (_lastAnnouncementEnabled.Value != announcement.Enabled)
+                return true;
+
+            if (!announcement.Enabled)
+            {
+                return !string.Equals(
+                    _lastAnnouncementFingerprint,
+                    fingerprint,
+                    StringComparison.Ordinal);
+            }
+
+            bool hasVersionIdentity =
+                !string.IsNullOrWhiteSpace(announcement.Version) ||
+                !string.IsNullOrWhiteSpace(announcement.UpdatedAt);
+            if (hasVersionIdentity)
+            {
+                return !string.Equals(
+                           _lastAnnouncementVersion,
+                           announcement.Version,
+                           StringComparison.Ordinal) ||
+                       !string.Equals(
+                           _lastAnnouncementUpdatedAt,
+                           announcement.UpdatedAt,
+                           StringComparison.Ordinal);
+            }
+
+            return !string.Equals(
+                _lastAnnouncementFingerprint,
+                fingerprint,
+                StringComparison.Ordinal);
         }
 
         private static AnnouncementInfo ParseAnnouncement(string json)

@@ -30,7 +30,7 @@ try
     builder.Logging.AddDebug();
     builder.WebHost.UseUrls(
         builder.Configuration["AnnouncementServer:Urls"] ??
-        "http://0.0.0.0:5088");
+        "http://127.0.0.1:5055");
     builder.Services.AddSingleton<AnnouncementBroker>();
     builder.Services.AddHttpClient();
     builder.Services.AddHostedService<AnnouncementGitHubPollingService>();
@@ -362,7 +362,11 @@ internal sealed class AnnouncementBroker
         {
             await WriteAtomicallyAsync(normalized, token);
             Volatile.Write(ref _currentJson, normalized);
-            await BroadcastAsync(normalized);
+            int sentClientCount = await BroadcastAsync(normalized);
+            _logger.LogInformation(
+                "PublishAsync completed. SentClients={SentClients}, ConnectedClientCount={ConnectedClientCount}",
+                sentClientCount,
+                ConnectedClientCount);
         }
         finally
         {
@@ -380,10 +384,12 @@ internal sealed class AnnouncementBroker
                 return false;
 
             Volatile.Write(ref _currentJson, json);
-            await BroadcastAsync(json);
+            int sentClientCount = await BroadcastAsync(json);
             _logger.LogInformation(
-                "Reloaded and broadcast announcement file {AnnouncementPath}.",
-                _announcementPath);
+                "Reloaded and broadcast announcement file {AnnouncementPath}. SentClients={SentClients}, ConnectedClientCount={ConnectedClientCount}",
+                _announcementPath,
+                sentClientCount,
+                ConnectedClientCount);
             return true;
         }
         finally
@@ -717,17 +723,24 @@ internal sealed class AnnouncementBroker
         }
     }
 
-    private async Task BroadcastAsync(string json)
+    private async Task<int> BroadcastAsync(string json)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        Task[] sends = _clients
+        Task<bool>[] sends = _clients
             .ToArray()
             .Select(client => SendToClientAsync(client, json, timeout.Token))
             .ToArray();
-        await Task.WhenAll(sends);
+        bool[] results = await Task.WhenAll(sends);
+        int sentClientCount = results.Count(sent => sent);
+        _logger.LogInformation(
+            "BroadcastAsync completed. SentClients={SentClients}, AttemptedClients={AttemptedClients}, ConnectedClientCount={ConnectedClientCount}",
+            sentClientCount,
+            sends.Length,
+            ConnectedClientCount);
+        return sentClientCount;
     }
 
-    private async Task SendToClientAsync(
+    private async Task<bool> SendToClientAsync(
         KeyValuePair<Guid, AnnouncementClient> client,
         string json,
         CancellationToken token)
@@ -735,6 +748,7 @@ internal sealed class AnnouncementBroker
         try
         {
             await client.Value.SendAsync(json, token);
+            return true;
         }
         catch (Exception ex) when (
             ex is WebSocketException or
@@ -750,6 +764,7 @@ internal sealed class AnnouncementBroker
             catch
             {
             }
+            return false;
         }
     }
 
@@ -869,7 +884,12 @@ internal sealed class AnnouncementGitHubPollingService : BackgroundService
             (sourceUrl.Contains('?') ? "&" : "?") +
             "t=" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-        _logger.LogInformation("[Announcement] Poll GitHub...");
+        string? oldFingerprint = _lastFingerprint;
+        _logger.LogInformation(
+            "[Announcement] Poll GitHub. SourceUrl={SourceUrl}, OldFingerprint={OldFingerprint}, ConnectedClientCount={ConnectedClientCount}",
+            sourceUrl,
+            FormatFingerprint(oldFingerprint),
+            _broker.ConnectedClientCount);
 
         try
         {
@@ -888,10 +908,26 @@ internal sealed class AnnouncementGitHubPollingService : BackgroundService
                 requestUrl,
                 HttpCompletionOption.ResponseContentRead,
                 token);
+            _logger.LogInformation(
+                "[Announcement] Poll response. SourceUrl={SourceUrl}, HttpStatus={HttpStatus}, ConnectedClientCount={ConnectedClientCount}",
+                sourceUrl,
+                (int)response.StatusCode,
+                _broker.ConnectedClientCount);
             response.EnsureSuccessStatusCode();
 
             string json = await response.Content.ReadAsStringAsync(token);
             string fingerprint = BuildFingerprint(json);
+            (string Version, string UpdatedAt) metadata =
+                ReadAnnouncementMetadata(json);
+            _logger.LogInformation(
+                "[Announcement] Poll result. SourceUrl={SourceUrl}, HttpStatus={HttpStatus}, OldFingerprint={OldFingerprint}, NewFingerprint={NewFingerprint}, Version={Version}, UpdatedAt={UpdatedAt}, ConnectedClientCount={ConnectedClientCount}",
+                sourceUrl,
+                (int)response.StatusCode,
+                FormatFingerprint(oldFingerprint),
+                FormatFingerprint(fingerprint),
+                metadata.Version,
+                metadata.UpdatedAt,
+                _broker.ConnectedClientCount);
             if (string.Equals(
                 fingerprint,
                 _lastFingerprint,
@@ -916,11 +952,21 @@ internal sealed class AnnouncementGitHubPollingService : BackgroundService
             }
 
             _logger.LogInformation(
-                "[Announcement] Changed detected. Broadcasting...");
+                "[Announcement] Change detected. SourceUrl={SourceUrl}, OldFingerprint={OldFingerprint}, NewFingerprint={NewFingerprint}, Version={Version}, UpdatedAt={UpdatedAt}, ConnectedClientCount={ConnectedClientCount}. Publishing...",
+                sourceUrl,
+                FormatFingerprint(oldFingerprint),
+                FormatFingerprint(fingerprint),
+                metadata.Version,
+                metadata.UpdatedAt,
+                _broker.ConnectedClientCount);
             await _broker.PublishAsync(normalized, token);
             _lastFingerprint = fingerprint;
             _logger.LogInformation(
-                "[Announcement] Broadcast completed. Client count: {ClientCount}",
+                "[Announcement] Publish completed. SourceUrl={SourceUrl}, NewFingerprint={NewFingerprint}, Version={Version}, UpdatedAt={UpdatedAt}, ConnectedClientCount={ConnectedClientCount}",
+                sourceUrl,
+                FormatFingerprint(fingerprint),
+                metadata.Version,
+                metadata.UpdatedAt,
                 _broker.ConnectedClientCount);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -930,7 +976,14 @@ internal sealed class AnnouncementGitHubPollingService : BackgroundService
         {
             _logger.LogWarning(
                 ex,
-                "[Announcement] GitHub poll failed; keeping the last valid announcement.");
+                "[Announcement] GitHub poll failed. SourceUrl={SourceUrl}, HttpStatus={HttpStatus}, OldFingerprint={OldFingerprint}, NewFingerprint={NewFingerprint}, Version={Version}, UpdatedAt={UpdatedAt}, ConnectedClientCount={ConnectedClientCount}. Keeping the last valid announcement.",
+                sourceUrl,
+                "unavailable",
+                FormatFingerprint(oldFingerprint),
+                "(unavailable)",
+                "(unavailable)",
+                "(unavailable)",
+                _broker.ConnectedClientCount);
         }
     }
 
@@ -938,6 +991,39 @@ internal sealed class AnnouncementGitHubPollingService : BackgroundService
     {
         byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(json ?? string.Empty));
         return Convert.ToHexString(hash);
+    }
+
+    private static (string Version, string UpdatedAt) ReadAnnouncementMetadata(
+        string json)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(json);
+            JsonElement root = document.RootElement;
+            return (
+                ReadString(root, "version"),
+                ReadString(root, "updatedAt"));
+        }
+        catch (JsonException)
+        {
+            return (string.Empty, string.Empty);
+        }
+    }
+
+    private static string ReadString(JsonElement root, string propertyName)
+    {
+        return root.ValueKind == JsonValueKind.Object &&
+               root.TryGetProperty(propertyName, out JsonElement value) &&
+               value.ValueKind == JsonValueKind.String
+            ? value.GetString() ?? string.Empty
+            : string.Empty;
+    }
+
+    private static string FormatFingerprint(string? fingerprint)
+    {
+        return string.IsNullOrWhiteSpace(fingerprint)
+            ? "(none)"
+            : fingerprint;
     }
 }
 

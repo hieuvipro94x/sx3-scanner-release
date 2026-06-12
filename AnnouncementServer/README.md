@@ -7,7 +7,7 @@ $env:SX3_ANNOUNCEMENT_ADMIN_TOKEN = "replace-with-a-long-random-token"
 dotnet run --project .\AnnouncementServer\SX3.AnnouncementServer.csproj
 ```
 
-The server listens on port `5088` by default:
+The server listens only on local port `5055` by default:
 
 - WebSocket: `/ws/announcements`
 - Current snapshot: `/api/announcements/current`
@@ -21,6 +21,6 @@ LAN or HTTPS address. Use `wss://` when the server is behind TLS.
 
 ```powershell
 .\BuildTools\Publish-Announcement.ps1 `
-  -ServerUrl "http://server-ip:5088" `
+  -ServerUrl "http://127.0.0.1:5055" `
   -Token $env:SX3_ANNOUNCEMENT_ADMIN_TOKEN
 ```

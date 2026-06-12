@@ -8,7 +8,7 @@ namespace SX3_SCANER.Model
 {
     internal class DatabaseInitialize
     {
-        private const int MainDatabaseSchemaVersion = 4;
+        private const int MainDatabaseSchemaVersion = 5;
         private const int ProductDatabaseSchemaVersion = 1;
         private const string LastIntegrityCheckKey = "LastIntegrityCheckUtc";
         private static readonly TimeSpan IntegrityCheckInterval = TimeSpan.FromDays(7);
@@ -48,6 +48,12 @@ namespace SX3_SCANER.Model
                 SetUserVersion(
                     DatabaseRepository.CreateConnection,
                     MainDatabaseSchemaVersion);
+            }
+            else
+            {
+                // Keep BoxProduct compatible even if an older deployment has an
+                // incorrect user_version or a partially migrated table.
+                BoxProductRepository.CreateTableIfNotExists();
             }
 
             int productVersion = GetUserVersion(DatabaseRepository.CreateProductConnection);

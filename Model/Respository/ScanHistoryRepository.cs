@@ -92,26 +92,7 @@ namespace SX3_SCANER.Model
                     {
                         while (reader.Read())
                         {
-                            scanHistoryItems.Add(new ScanHistory
-                            {
-                                ID = Convert.ToInt32(reader["ID"]),
-                                ScanTime = Convert.ToDateTime(reader["ScanTime"]),
-                                BoxName = reader["BoxName"].ToString(),
-                                ProductPartNumber = reader["ProductPartNumber"].ToString(),
-                                ProductPartName = reader["ProductPartName"].ToString(),
-                                SealNo = reader["SealNo"].ToString(),
-                                LotNo = reader["LotNo"].ToString(),
-                                ScanData = reader["ScanData"].ToString(),
-                                ScanResult = Convert.ToBoolean(Convert.ToInt32(reader["ScanResult"])),
-                                ScanMessage = reader["ScanMessage"].ToString(),
-                                ScanWorker = reader["ScanWorker"].ToString(),
-                                BoxType = reader["BoxType"].ToString(),
-                                IsPartialBox = Convert.ToBoolean(Convert.ToInt32(reader["IsPartialBox"])),
-                                BoxDate = SafeDateTime(reader, "BoxDate") ?? SafeDateTime(reader, "ScanTime"),
-                                ScanLabelDate = SafeDateTime(reader, "ScanLabelDate") ?? ParseSealDate(reader["SealNo"].ToString()),
-                                ActualQty = SafeInt(reader, "ActualQty"),
-                                TargetQty = SafeInt(reader, "TargetQty")
-                            });
+                            scanHistoryItems.Add(ReadScanHistory(reader));
                         }
                     }
                 }
@@ -133,26 +114,7 @@ namespace SX3_SCANER.Model
                     {
                         while (reader.Read())
                         {
-                            scanHistoryItems.Add(new ScanHistory
-                            {
-                                ID = Convert.ToInt32(reader["ID"]),
-                                ScanTime = Convert.ToDateTime(reader["ScanTime"]),
-                                BoxName = reader["BoxName"].ToString(),
-                                ProductPartNumber = reader["ProductPartNumber"].ToString(),
-                                ProductPartName = reader["ProductPartName"].ToString(),
-                                SealNo = reader["SealNo"].ToString(),
-                                LotNo = reader["LotNo"].ToString(),
-                                ScanData = reader["ScanData"].ToString(),
-                                ScanResult = Convert.ToBoolean(Convert.ToInt32(reader["ScanResult"])),
-                                ScanMessage = reader["ScanMessage"].ToString(),
-                                ScanWorker = reader["ScanWorker"].ToString(),
-                                BoxType = reader["BoxType"].ToString(),
-                                IsPartialBox = Convert.ToBoolean(Convert.ToInt32(reader["IsPartialBox"])),
-                                BoxDate = SafeDateTime(reader, "BoxDate") ?? SafeDateTime(reader, "ScanTime"),
-                                ScanLabelDate = SafeDateTime(reader, "ScanLabelDate") ?? ParseSealDate(reader["SealNo"].ToString()),
-                                ActualQty = SafeInt(reader, "ActualQty"),
-                                TargetQty = SafeInt(reader, "TargetQty")
-                            });
+                            scanHistoryItems.Add(ReadScanHistory(reader));
                         }
                     }
                 }
@@ -348,26 +310,7 @@ namespace SX3_SCANER.Model
                     {
                         while (reader.Read())
                         {
-                            notCompleteScans.Add(new ScanHistory
-                            {
-                                ID = Convert.ToInt32(reader["ID"]),
-                                ScanTime = DateTime.Parse(reader["ScanTime"].ToString()),
-                                BoxName = reader["BoxName"].ToString(),
-                                ProductPartNumber = reader["ProductPartNumber"].ToString(),
-                                ProductPartName = reader["ProductPartName"].ToString(),
-                                SealNo = reader["SealNo"].ToString(),
-                                LotNo = reader["LotNo"].ToString(),
-                                ScanData = reader["ScanData"].ToString(),
-                                ScanResult = Convert.ToBoolean(Convert.ToInt32(reader["ScanResult"])),
-                                ScanMessage = reader["ScanMessage"].ToString(),
-                                ScanWorker = reader["ScanWorker"].ToString(),
-                                BoxType = reader["BoxType"].ToString(),
-                                IsPartialBox = Convert.ToBoolean(Convert.ToInt32(reader["IsPartialBox"])),
-                                BoxDate = SafeDateTime(reader, "BoxDate") ?? SafeDateTime(reader, "ScanTime"),
-                                ScanLabelDate = SafeDateTime(reader, "ScanLabelDate") ?? ParseSealDate(reader["SealNo"].ToString()),
-                                ActualQty = SafeInt(reader, "ActualQty"),
-                                TargetQty = SafeInt(reader, "TargetQty")
-                            });
+                            notCompleteScans.Add(ReadScanHistory(reader));
                         }
                     }
                 }
@@ -574,6 +517,10 @@ namespace SX3_SCANER.Model
 
             using (SQLiteConnection connection = DatabaseRepository.CreateConnection())
             {
+                bool hasBoxType = TableHasColumn(
+                    connection,
+                    HistoryTableName,
+                    "BoxType");
                 string selectQuery = @"
                     SELECT
                         ID,
@@ -587,8 +534,36 @@ namespace SX3_SCANER.Model
                         ScanResult,
                         ScanMessage,
                         ScanWorker,
-                        BoxType,
-                        IsPartialBox
+                        " + SelectColumnOrDefault(
+                            connection,
+                            HistoryTableName,
+                            "BoxType",
+                            "'OPEN'") + @",
+                        " + SelectColumnOrDefault(
+                            connection,
+                            HistoryTableName,
+                            "IsPartialBox",
+                            "0") + @",
+                        " + SelectColumnOrDefault(
+                            connection,
+                            HistoryTableName,
+                            "BoxDate",
+                            "NULL") + @",
+                        " + SelectColumnOrDefault(
+                            connection,
+                            HistoryTableName,
+                            "ScanLabelDate",
+                            "NULL") + @",
+                        " + SelectColumnOrDefault(
+                            connection,
+                            HistoryTableName,
+                            "ActualQty",
+                            "0") + @",
+                        " + SelectColumnOrDefault(
+                            connection,
+                            HistoryTableName,
+                            "TargetQty",
+                            "0") + @"
                     FROM ScanHistoryView
                     WHERE 1=1";
 
@@ -637,8 +612,12 @@ namespace SX3_SCANER.Model
                             OR COALESCE(LotNo, '') COLLATE NOCASE LIKE " + parameterName + @" ESCAPE '\'
                             OR COALESCE(ScanMessage, '') COLLATE NOCASE LIKE " + parameterName + @" ESCAPE '\'
                             OR COALESCE(ScanWorker, '') COLLATE NOCASE LIKE " + parameterName + @" ESCAPE '\'
-                            OR COALESCE(ScanData, '') COLLATE NOCASE LIKE " + parameterName + @" ESCAPE '\'
+                            OR COALESCE(ScanData, '') COLLATE NOCASE LIKE " + parameterName + @" ESCAPE '\'";
+                        if (hasBoxType)
+                        {
+                            selectQuery += @"
                             OR COALESCE(BoxType, '') COLLATE NOCASE LIKE " + parameterName + @" ESCAPE '\'";
+                        }
                     }
                     selectQuery += ")";
                 }
@@ -740,26 +719,41 @@ namespace SX3_SCANER.Model
 
         private static string SafeString(SQLiteDataReader reader, string columnName, string defaultValue = "")
         {
-            object value = reader[columnName];
+            int ordinal;
+            if (!TryGetOrdinal(reader, columnName, out ordinal) ||
+                reader.IsDBNull(ordinal))
+            {
+                return defaultValue;
+            }
+
+            object value = reader.GetValue(ordinal);
             return value == null || value == DBNull.Value ? defaultValue : Convert.ToString(value);
         }
 
         private static int SafeInt(SQLiteDataReader reader, string columnName)
         {
-            object value = reader[columnName];
-            if (value == null || value == DBNull.Value)
+            int ordinal;
+            if (!TryGetOrdinal(reader, columnName, out ordinal) ||
+                reader.IsDBNull(ordinal))
             {
                 return 0;
             }
 
+            object value = reader.GetValue(ordinal);
             int result;
             return int.TryParse(Convert.ToString(value), out result) ? result : 0;
         }
 
         private static bool SafeBool(SQLiteDataReader reader, string columnName)
         {
-            object value = reader[columnName];
-            if (value == null || value == DBNull.Value) return false;
+            int ordinal;
+            if (!TryGetOrdinal(reader, columnName, out ordinal) ||
+                reader.IsDBNull(ordinal))
+            {
+                return false;
+            }
+
+            object value = reader.GetValue(ordinal);
             if (value is bool) return (bool)value;
 
             int numericValue;
@@ -774,10 +768,14 @@ namespace SX3_SCANER.Model
 
         private static DateTime? SafeDateTime(SQLiteDataReader reader, string columnName)
         {
-            if (!HasColumn(reader, columnName)) return null;
-            object value = reader[columnName];
-            if (value == null || value == DBNull.Value) return null;
+            int ordinal;
+            if (!TryGetOrdinal(reader, columnName, out ordinal) ||
+                reader.IsDBNull(ordinal))
+            {
+                return null;
+            }
 
+            object value = reader.GetValue(ordinal);
             DateTime result;
             return DateTime.TryParse(Convert.ToString(value), out result)
                 ? (DateTime?)result
@@ -786,11 +784,76 @@ namespace SX3_SCANER.Model
 
         private static bool HasColumn(SQLiteDataReader reader, string columnName)
         {
+            int ordinal;
+            return TryGetOrdinal(reader, columnName, out ordinal);
+        }
+
+        private static string SelectColumnOrDefault(
+            SQLiteConnection connection,
+            string tableName,
+            string columnName,
+            string defaultSql)
+        {
+            return TableHasColumn(connection, tableName, columnName)
+                ? columnName
+                : defaultSql + " AS " + columnName;
+        }
+
+        private static bool TableHasColumn(
+            SQLiteConnection connection,
+            string tableName,
+            string columnName)
+        {
+            using (SQLiteCommand command = new SQLiteCommand(
+                "PRAGMA table_info(" + tableName + ")",
+                connection))
+            using (SQLiteDataReader reader = command.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    if (string.Equals(
+                        SafeString(reader, "name"),
+                        columnName,
+                        StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        private static bool TryGetOrdinal(
+            SQLiteDataReader reader,
+            string columnName,
+            out int ordinal)
+        {
+            ordinal = -1;
+            if (reader == null || string.IsNullOrWhiteSpace(columnName))
+                return false;
+
+            try
+            {
+                ordinal = reader.GetOrdinal(columnName);
+                return ordinal >= 0;
+            }
+            catch (IndexOutOfRangeException)
+            {
+            }
+            catch (ArgumentException)
+            {
+            }
+
             for (int i = 0; i < reader.FieldCount; i++)
             {
                 if (string.Equals(reader.GetName(i), columnName, StringComparison.OrdinalIgnoreCase))
+                {
+                    ordinal = i;
                     return true;
+                }
             }
+
             return false;
         }
 

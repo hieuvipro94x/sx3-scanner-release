@@ -57,7 +57,8 @@ Type: files; Name: "{commonstartup}\SX3 SCANER.lnk"
 Source: "{#MySourceDir}\*"; DestDir: "{app}"; Excludes: "database.db,product.db,database.db-wal,database.db-shm,product.db-wal,product.db-shm,database.db-journal,product.db-journal"; Flags: ignoreversion
 Source: "{#MySourceDir}\x64\*"; DestDir: "{app}\x64"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#MySourceDir}\x86\*"; DestDir: "{app}\x86"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "{#MySourceDir}\AnnouncementServer\*"; DestDir: "{app}\AnnouncementServer"; Flags: ignoreversion onlyifdoesntexist recursesubdirs createallsubdirs
+Source: "..\AnnouncementServer\publish\*"; DestDir: "{app}\AnnouncementServer"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\Sounds\*.wav"; DestDir: "{app}\Sounds"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\SX3 Scanner"; Filename: "{app}\{#MyAppExeName}"
@@ -104,7 +105,7 @@ end;
 function InitializeSetup(): Boolean;
 begin
   KillProcessByName('SX3 SCANER.exe');
-  KillProcessByName('SX3.AnnouncementServer.exe');
+  KillProcessByName('AnnouncementServer.exe');
   Sleep(2000);
   Result := True;
 end;
@@ -113,7 +114,7 @@ function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   StopAnnouncementServer;
   KillProcessByName('SX3 SCANER.exe');
-  KillProcessByName('SX3.AnnouncementServer.exe');
+  KillProcessByName('AnnouncementServer.exe');
   Sleep(2000);
   Result := '';
 end;

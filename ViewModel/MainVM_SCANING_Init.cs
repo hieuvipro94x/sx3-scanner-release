@@ -475,20 +475,16 @@ namespace SX3_SCANER.ViewModel
         private void InitializeScaningPropeties()
         {
             SelectedDate = DateTime.Now;
+            ToDayBoxSource = new BoxProductRepository().GetAllTodayBox(SelectedDate);
             LoadInitialListsAsync();
         }
 
         private async void LoadInitialListsAsync()
         {
-            var result = await Task.Run(() => new
-            {
-                PartNumbers = new LabelProductInfoRepository().GetAllLabelProductInfo()
-                    .Select(x => x.PartNumber).ToList(),
-                TodayBoxes = new BoxProductRepository().GetAllTodayBox()
-            });
-
-            PartNumberList = result.PartNumbers;
-            ToDayBoxSource = result.TodayBoxes;
+            PartNumberList = await Task.Run(() =>
+                new LabelProductInfoRepository().GetAllLabelProductInfo()
+                    .Select(x => x.PartNumber)
+                    .ToList());
         }
     }
 }

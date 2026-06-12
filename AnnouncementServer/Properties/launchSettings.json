@@ -2,11 +2,11 @@
   "profiles": {
     "SX3.AnnouncementServer": {
       "commandName": "Project",
-      "launchBrowser": true,
+      "launchBrowser": false,
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       },
-      "applicationUrl": "https://localhost:54309;http://localhost:54310"
+      "applicationUrl": "http://127.0.0.1:5055"
     }
   }
 }

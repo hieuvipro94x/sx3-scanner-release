@@ -181,7 +181,8 @@ namespace SX3_SCANER.Model
                         UPDATE BoxProduct
                         SET BoxName = @BoxName, ProductPartName = @ProductPartName, ProductPartNumber = @ProductPartNumber, BoxSealNo = @BoxSealNo,
                             BoxQuantity = @BoxQuantity, BoxProgress = @BoxProgress, BoxComplete = @BoxComplete, BoxWorker = @BoxWorker,
-                            BoxType = @BoxType, IsPartialBox = @IsPartialBox
+                            BoxType = @BoxType, IsPartialBox = @IsPartialBox, BoxDate = @BoxDate,
+                            ScanLabelDate = @ScanLabelDate, ActualQty = @ActualQty, TargetQty = @TargetQty
                         WHERE ID = @ID";
                     using (SQLiteCommand command = new SQLiteCommand(updateQuery, connection, transaction))
                     {
@@ -195,6 +196,10 @@ namespace SX3_SCANER.Model
                         command.Parameters.AddWithValue("@BoxWorker", boxProduct.BoxWorker);
                         command.Parameters.AddWithValue("@BoxType", boxProduct.BoxType);
                         command.Parameters.AddWithValue("@IsPartialBox", boxProduct.IsPartialBox ? 1 : 0);
+                        command.Parameters.AddWithValue("@BoxDate", boxProduct.BoxDate.HasValue ? (object)boxProduct.BoxDate.Value.Date : DBNull.Value);
+                        command.Parameters.AddWithValue("@ScanLabelDate", boxProduct.ScanLabelDate.HasValue ? (object)boxProduct.ScanLabelDate.Value.Date : DBNull.Value);
+                        command.Parameters.AddWithValue("@ActualQty", boxProduct.ActualQty);
+                        command.Parameters.AddWithValue("@TargetQty", boxProduct.TargetQty);
                         command.Parameters.AddWithValue("@ID", boxProduct.ID);
                         command.ExecuteNonQuery();
                     }
@@ -398,16 +403,34 @@ namespace SX3_SCANER.Model
 
         public ObservableCollection<BoxProduct> GetAllTodayBox()
         {
-            ObservableCollection<BoxProduct> todayBoxes = new ObservableCollection<BoxProduct>();
-            string today = DateTime.Now.ToString("yyMMdd");
+            return GetAllTodayBox(DateTime.Today);
+        }
 
-            using (SQLiteConnection connection = new SQLiteConnection(_connectionString))
+        public ObservableCollection<BoxProduct> GetAllTodayBox(DateTime businessDate)
+        {
+            ObservableCollection<BoxProduct> todayBoxes = new ObservableCollection<BoxProduct>();
+            DateTime date = businessDate.Date;
+            string sealNo = date.ToString("yyMMdd");
+
+            using (SQLiteConnection connection = DatabaseRepository.CreateConnection())
             {
-                connection.Open();
-                string query = "SELECT * FROM BoxProduct WHERE BoxName LIKE @TodayPrefix";
+                const string query = @"
+                    SELECT *
+                    FROM BoxProduct
+                    WHERE date(BoxDate) = date(@BusinessDate)
+                       OR (
+                            (BoxDate IS NULL OR TRIM(BoxDate) = '')
+                            AND (
+                                BoxSealNo = @SealNo
+                                OR BoxName LIKE @TodayPrefix
+                            )
+                       )
+                    ORDER BY ID DESC";
                 using (SQLiteCommand command = new SQLiteCommand(query, connection))
                 {
-                    command.Parameters.AddWithValue("@TodayPrefix", $"P{today}%");
+                    command.Parameters.AddWithValue("@BusinessDate", date);
+                    command.Parameters.AddWithValue("@SealNo", sealNo);
+                    command.Parameters.AddWithValue("@TodayPrefix", "P" + sealNo + "%");
                     using (SQLiteDataReader reader = command.ExecuteReader())
                     {
                         while (reader.Read())

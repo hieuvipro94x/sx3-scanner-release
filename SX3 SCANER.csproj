@@ -147,6 +147,7 @@
     <Compile Include="Helper\UpdateInfo.cs" />
     <Compile Include="Helper\UpdateService.cs" />
     <Compile Include="Helper\OnlineAnnouncementService.cs" />
+    <Compile Include="Helper\ScanSoundService.cs" />
     <Compile Include="Helper\ScanRowBrushConverters.cs" />
     <Compile Include="Helper\StartupManager.cs" />
     <Compile Include="Helper\StartupStatusWindow.cs" />
@@ -244,6 +245,12 @@
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>
     </EmbeddedResource>
     <None Include="announcement.json" />
+    <Content Include="Sounds\OK.wav">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Sounds\NG.wav">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <None Include="packages.config" />
     <None Include="Properties\app.manifest" />
     <None Include="Properties\Settings.settings">
@@ -279,7 +286,7 @@
       <AnnouncementServerArtifacts>$(BaseIntermediateOutputPath)AnnouncementServerArtifacts</AnnouncementServerArtifacts>
       <AnnouncementServerPublishDir>$(TargetDir)AnnouncementServer</AnnouncementServerPublishDir>
     </PropertyGroup>
-    <Exec Command="dotnet publish &quot;$(AnnouncementServerProject)&quot; --configuration $(Configuration) --framework net8.0 --artifacts-path &quot;$(AnnouncementServerArtifacts)&quot; --output &quot;$(AnnouncementServerPublishDir)&quot; --no-self-contained" />
+    <Exec Command="dotnet publish &quot;$(AnnouncementServerProject)&quot; --configuration $(Configuration) --framework net8.0 --runtime win-x64 --artifacts-path &quot;$(AnnouncementServerArtifacts)&quot; --output &quot;$(AnnouncementServerPublishDir)&quot; --self-contained true" />
   </Target>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>

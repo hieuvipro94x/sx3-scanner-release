@@ -9,127 +9,143 @@ namespace SX3_SCANER.Helper
 {
     internal sealed class AnnouncementServerRunner : IDisposable
     {
-        private const string ProcessName = "SX3.AnnouncementServer";
-        private const string ExecutableName = "SX3.AnnouncementServer.exe";
-        private const string ShutdownEventName =
-            @"Local\SX3_AnnouncementServer_Shutdown";
-        private const string ReadyUrl = "http://127.0.0.1:5088/health";
+        private const string ExecutableName = "AnnouncementServer.exe";
+        private const string ReadyUrl = "http://127.0.0.1:5055/health";
         private static readonly TimeSpan StartupTimeout = TimeSpan.FromSeconds(10);
         private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(2);
         private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(250);
 
         private readonly object _syncRoot = new object();
-        private Process _process;
+        private readonly HttpClient _httpClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(1)
+        };
+
+        private Process _ownedProcess;
         private EventWaitHandle _shutdownEvent;
+        private string _shutdownEventName;
         private bool _disposed;
 
-        public bool Start()
+        public async Task<bool> StartAsync(CancellationToken token = default)
         {
-            lock (_syncRoot)
+            try
             {
-                try
+                ThrowIfDisposed();
+
+                if (await IsServerReadyAsync(token).ConfigureAwait(false))
+                {
+                    StartupManager.Log(
+                        "[Announcement] Local server is already ready. " +
+                        "The scanner will not take ownership of that process.");
+                    return true;
+                }
+
+                string executablePath = ResolveExecutablePath();
+                if (!File.Exists(executablePath))
+                {
+                    StartupManager.Log(
+                        "[Announcement] Server executable was not found. Path=" +
+                        executablePath);
+                    return false;
+                }
+
+                Process process;
+                lock (_syncRoot)
                 {
                     ThrowIfDisposed();
 
-                    if (_process != null && !_process.HasExited)
-                        return true;
-
-                    Process existingProcess = FindExistingProcess();
-                    if (existingProcess != null)
-                    {
-                        try
-                        {
-                            StartupManager.Log(
-                                "[Announcement] Server is already running. PID=" +
-                                existingProcess.Id);
-                            WaitUntilReady();
-                            return true;
-                        }
-                        finally
-                        {
-                            existingProcess.Dispose();
-                        }
-                    }
-
-                    if (IsServerReady())
-                    {
-                        StartupManager.Log(
-                            "[Announcement] Announcement endpoint is already active.");
-                        return true;
-                    }
-
-                    string executablePath = ResolveExecutablePath();
-                    if (!File.Exists(executablePath))
-                    {
-                        StartupManager.Log(
-                            "Không tìm thấy SX3.AnnouncementServer.exe, bỏ qua khởi động Announcement Server. Path=" +
-                            executablePath);
-                        return false;
-                    }
-
-                    string workingDirectory = Path.GetDirectoryName(executablePath);
-                    _shutdownEvent = new EventWaitHandle(
-                        false,
-                        EventResetMode.ManualReset,
-                        ShutdownEventName);
-                    _shutdownEvent.Reset();
-
-                    int parentProcessId;
-                    using (Process currentProcess = Process.GetCurrentProcess())
-                        parentProcessId = currentProcess.Id;
-
-                    var startInfo = new ProcessStartInfo
-                    {
-                        FileName = executablePath,
-                        Arguments =
-                            "--ParentProcessId " + parentProcessId +
-                            " --ShutdownEventName \"" + ShutdownEventName + "\"",
-                        WorkingDirectory = workingDirectory,
-                        UseShellExecute = false,
-                        CreateNoWindow = true,
-                        WindowStyle = ProcessWindowStyle.Hidden
-                    };
-
-                    StartupManager.Log(
-                        "[Announcement] Starting server: " + executablePath);
-                    _process = Process.Start(startInfo);
-                    if (_process == null)
-                        throw new InvalidOperationException("Process.Start returned null.");
-
-                    WaitUntilReady();
-                    StartupManager.Log(
-                        "[Announcement] Server started. PID=" + _process.Id);
-                    return true;
+                    if (_ownedProcess != null && !_ownedProcess.HasExited)
+                        process = _ownedProcess;
+                    else
+                        process = StartOwnedProcess(executablePath);
                 }
-                catch (Exception ex)
-                {
-                    try
-                    {
-                        StopOwnedProcess();
-                    }
-                    catch (Exception cleanupException)
-                    {
-                        StartupManager.Log(
-                            "[Announcement] Failed to clean up after startup error: " +
-                            cleanupException);
-                    }
 
+                bool isReady = await WaitUntilReadyAsync(token)
+                    .ConfigureAwait(false);
+                if (!isReady)
+                {
                     StartupManager.Log(
-                        "Announcement Server khởi động thất bại, tính năng thông báo online sẽ bị tắt. Chi tiết: " +
-                        ex);
+                        "[Announcement] Server did not become ready within " +
+                        StartupTimeout.TotalSeconds + " seconds. PID=" +
+                        process.Id);
+                    Stop();
                     return false;
                 }
+
+                StartupManager.Log(
+                    "[Announcement] Server is ready. PID=" + process.Id);
+                return true;
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                StartupManager.Log("[Announcement] Server startup was cancelled.");
+                Stop();
+                return false;
+            }
+            catch (Exception ex)
+            {
+                StartupManager.Log(
+                    "[Announcement] Server startup failed; scanner will continue. " +
+                    ex);
+                Stop();
+                return false;
             }
         }
 
         public void Stop()
         {
+            Process process;
+            EventWaitHandle shutdownEvent;
+
             lock (_syncRoot)
             {
-                if (_disposed)
-                    return;
+                process = _ownedProcess;
+                shutdownEvent = _shutdownEvent;
+                _ownedProcess = null;
+                _shutdownEvent = null;
+                _shutdownEventName = null;
+            }
 
-                StopOwnedProcess();
+            if (process == null)
+            {
+                shutdownEvent?.Dispose();
+                return;
+            }
+
+            try
+            {
+                if (!process.HasExited)
+                {
+                    StartupManager.Log(
+                        "[Announcement] Stopping owned server. PID=" + process.Id);
+                    shutdownEvent?.Set();
+
+                    if (!process.WaitForExit(
+                            (int)ShutdownTimeout.TotalMilliseconds))
+                    {
+                        StartupManager.Log(
+                            "[Announcement] Owned server shutdown timed out; " +
+                            "terminating PID=" + process.Id);
+                        process.Kill();
+                        process.WaitForExit(
+                            (int)ShutdownTimeout.TotalMilliseconds);
+                    }
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                StartupManager.Log(
+                    "[Announcement] Owned server has already stopped.");
+            }
+            catch (Exception ex)
+            {
+                StartupManager.Log(
+                    "[Announcement] Failed to stop owned server cleanly. " + ex);
+            }
+            finally
+            {
+                process.Dispose();
+                shutdownEvent?.Dispose();
             }
         }
 
@@ -140,175 +156,77 @@ namespace SX3_SCANER.Helper
                 if (_disposed)
                     return;
 
-                StopOwnedProcess();
                 _disposed = true;
             }
 
+            Stop();
+            _httpClient.Dispose();
             GC.SuppressFinalize(this);
         }
 
-        private void StopOwnedProcess()
+        private Process StartOwnedProcess(string executablePath)
         {
-            Process process = _process;
-            _process = null;
+            string workingDirectory = Path.GetDirectoryName(executablePath);
+            int parentProcessId;
+            using (Process currentProcess = Process.GetCurrentProcess())
+                parentProcessId = currentProcess.Id;
 
-            if (process == null)
+            _shutdownEventName =
+                @"Local\SX3_AnnouncementServer_Shutdown_" +
+                parentProcessId + "_" + Guid.NewGuid().ToString("N");
+            _shutdownEvent = new EventWaitHandle(
+                false,
+                EventResetMode.ManualReset,
+                _shutdownEventName);
+
+            var startInfo = new ProcessStartInfo
             {
-                SignalSharedShutdownEvent();
-                StopExistingProcesses();
-                DisposeShutdownEvent();
-                return;
-            }
+                FileName = executablePath,
+                Arguments =
+                    "--ParentProcessId " + parentProcessId +
+                    " --ShutdownEventName \"" + _shutdownEventName + "\"",
+                WorkingDirectory = workingDirectory,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
 
-            TryStopProcess(process);
-            DisposeShutdownEvent();
+            StartupManager.Log(
+                "[Announcement] Starting owned server: " + executablePath);
+            _ownedProcess = Process.Start(startInfo);
+            if (_ownedProcess == null)
+                throw new InvalidOperationException("Process.Start returned null.");
+
+            return _ownedProcess;
         }
 
-        private void TryStopProcess(Process process)
-        {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    StartupManager.Log(
-                        "[Announcement] Stopping server. PID=" + process.Id);
-                    process.CloseMainWindow();
-                    SignalSharedShutdownEvent();
-
-                    if (!process.WaitForExit((int)ShutdownTimeout.TotalMilliseconds))
-                    {
-                        StartupManager.Log(
-                            "[Announcement] Graceful shutdown timed out; killing process.");
-                        process.Kill();
-                        process.WaitForExit((int)ShutdownTimeout.TotalMilliseconds);
-                    }
-                }
-
-                StartupManager.Log("[Announcement] Server stopped.");
-            }
-            catch (InvalidOperationException)
-            {
-                StartupManager.Log("[Announcement] Server already stopped.");
-            }
-            catch (Exception ex)
-            {
-                StartupManager.Log(
-                    "[Announcement] Failed to stop server cleanly: " + ex);
-                try
-                {
-                    if (!process.HasExited)
-                        process.Kill();
-                }
-                catch
-                {
-                }
-            }
-            finally
-            {
-                process.Dispose();
-            }
-        }
-
-        private void StopExistingProcesses()
-        {
-            Process[] processes;
-            try
-            {
-                processes = Process.GetProcessesByName(ProcessName);
-            }
-            catch (Exception ex)
-            {
-                StartupManager.Log(
-                    "[Announcement] Failed to find server processes: " + ex);
-                return;
-            }
-
-            foreach (Process existingProcess in processes)
-                TryStopProcess(existingProcess);
-        }
-
-        private void DisposeShutdownEvent()
-        {
-            _shutdownEvent?.Dispose();
-            _shutdownEvent = null;
-        }
-
-        private void SignalSharedShutdownEvent()
-        {
-            try
-            {
-                if (_shutdownEvent == null)
-                {
-                    _shutdownEvent = EventWaitHandle.OpenExisting(
-                        ShutdownEventName);
-                }
-
-                _shutdownEvent.Set();
-            }
-            catch (WaitHandleCannotBeOpenedException)
-            {
-                StartupManager.Log(
-                    "[Announcement] Shared shutdown event is not available.");
-            }
-        }
-
-        private static Process FindExistingProcess()
-        {
-            Process[] processes = Process.GetProcessesByName(ProcessName);
-            Process selected = processes.Length > 0 ? processes[0] : null;
-
-            foreach (Process process in processes)
-            {
-                if (!ReferenceEquals(process, selected))
-                    process.Dispose();
-            }
-
-            return selected;
-        }
-
-        private static string ResolveExecutablePath()
-        {
-            return Path.Combine(
-                AppDomain.CurrentDomain.BaseDirectory,
-                "AnnouncementServer",
-                ExecutableName);
-        }
-
-        private static void WaitUntilReady()
+        private async Task<bool> WaitUntilReadyAsync(CancellationToken token)
         {
             DateTime deadlineUtc = DateTime.UtcNow + StartupTimeout;
             while (DateTime.UtcNow < deadlineUtc)
             {
-                if (IsServerReady())
-                    return;
+                token.ThrowIfCancellationRequested();
 
-                Thread.Sleep(RetryDelay);
+                if (await IsServerReadyAsync(token).ConfigureAwait(false))
+                    return true;
+
+                await Task.Delay(RetryDelay, token).ConfigureAwait(false);
             }
 
-            if (!IsServerReady())
-            {
-                throw new TimeoutException(
-                    "Announcement Server did not become ready within " +
-                    StartupTimeout.TotalSeconds + " seconds.");
-            }
+            return await IsServerReadyAsync(token).ConfigureAwait(false);
         }
 
-        private static bool IsServerReady()
+        private async Task<bool> IsServerReadyAsync(CancellationToken token)
         {
             try
             {
-                using (var client = new HttpClient
-                {
-                    Timeout = TimeSpan.FromSeconds(1)
-                })
-                using (var request = new HttpRequestMessage(HttpMethod.Get, ReadyUrl))
-                using (HttpResponseMessage response = client
-                    .SendAsync(
+                using (var request =
+                    new HttpRequestMessage(HttpMethod.Get, ReadyUrl))
+                using (HttpResponseMessage response =
+                    await _httpClient.SendAsync(
                         request,
                         HttpCompletionOption.ResponseHeadersRead,
-                        CancellationToken.None)
-                    .GetAwaiter()
-                    .GetResult())
+                        token).ConfigureAwait(false))
                 {
                     return response.IsSuccessStatusCode;
                 }
@@ -317,10 +235,18 @@ namespace SX3_SCANER.Helper
             {
                 return false;
             }
-            catch (TaskCanceledException)
+            catch (TaskCanceledException) when (!token.IsCancellationRequested)
             {
                 return false;
             }
+        }
+
+        private static string ResolveExecutablePath()
+        {
+            return Path.Combine(
+                AppDomain.CurrentDomain.BaseDirectory,
+                "AnnouncementServer",
+                ExecutableName);
         }
 
         private void ThrowIfDisposed()

@@ -41,8 +41,8 @@ namespace SX3_SCANER
                 _announcementServerRunner = new AnnouncementServerRunner();
                 try
                 {
-                    bool announcementStarted = await Task.Run(
-                        () => _announcementServerRunner.Start());
+                    bool announcementStarted =
+                        await _announcementServerRunner.StartAsync();
                     if (!announcementStarted)
                     {
                         StartupManager.SetStatus(
