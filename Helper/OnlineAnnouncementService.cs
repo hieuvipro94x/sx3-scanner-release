@@ -41,6 +41,8 @@ namespace SX3_SCANER.Helper
         private bool _isDisposed;
         private string _lastAnnouncementFingerprint;
         private DateTime _lastSnapshotAttemptUtc = DateTime.MinValue;
+        private static readonly TimeSpan SnapshotFallbackInterval =
+            TimeSpan.FromSeconds(15);
 
         public OnlineAnnouncementService()
         {
@@ -109,6 +111,8 @@ namespace SX3_SCANER.Helper
                             if (json == null)
                                 break;
 
+                            StartupManager.Log(
+                                "[Announcement] Realtime payload received.");
                             await ProcessAnnouncementJsonAsync(
                                 json,
                                 saveCache: true,
@@ -132,7 +136,7 @@ namespace SX3_SCANER.Helper
                 try
                 {
                     if (DateTime.UtcNow - _lastSnapshotAttemptUtc >=
-                        TimeSpan.FromMinutes(15))
+                        SnapshotFallbackInterval)
                     {
                         await LoadSnapshotAsync().ConfigureAwait(false);
                     }
@@ -194,11 +198,16 @@ namespace SX3_SCANER.Helper
                     byte[] bytes = await response.Content.ReadAsByteArrayAsync()
                         .ConfigureAwait(false);
                     string json = Encoding.UTF8.GetString(bytes);
-                    await ProcessAnnouncementJsonAsync(
+                    bool updated = await ProcessAnnouncementJsonAsync(
                         json,
                         saveCache: true,
                         source: AnnouncementSource.Snapshot)
                         .ConfigureAwait(false);
+                    if (updated)
+                    {
+                        StartupManager.Log(
+                            "[Announcement] Snapshot updated.");
+                    }
                 }
             }
             catch (Exception ex)
@@ -208,7 +217,7 @@ namespace SX3_SCANER.Helper
             }
         }
 
-        private async Task ProcessAnnouncementJsonAsync(
+        private async Task<bool> ProcessAnnouncementJsonAsync(
             string json,
             bool saveCache,
             AnnouncementSource source)
@@ -221,14 +230,14 @@ namespace SX3_SCANER.Helper
             catch (Exception ex)
             {
                 LogInvalidPayload(source, ex.Message);
-                return;
+                return false;
             }
 
             if (ContainsInvalidEncoding(json) ||
                 ContainsInvalidEncoding(announcement))
             {
                 LogInvalidPayload(source, null);
-                return;
+                return false;
             }
 
             string fingerprint = BuildFingerprint(json);
@@ -238,7 +247,7 @@ namespace SX3_SCANER.Helper
                 fingerprint,
                 StringComparison.Ordinal))
             {
-                return;
+                return false;
             }
 
             if (saveCache)
@@ -264,6 +273,7 @@ namespace SX3_SCANER.Helper
                 _lastAnnouncementFingerprint = fingerprint;
                 AnnouncementChanged?.Invoke(this, announcement);
             }).Task.ConfigureAwait(false);
+            return true;
         }
 
         private static AnnouncementInfo ParseAnnouncement(string json)

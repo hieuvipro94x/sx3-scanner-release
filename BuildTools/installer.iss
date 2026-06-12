@@ -58,7 +58,10 @@ Type: files; Name: "{userstartup}\SX3 SCANER.lnk"
 Type: files; Name: "{commonstartup}\SX3 SCANER.lnk"
 
 [Files]
-Source: "{#MySourceDir}*"; DestDir: "{app}"; Excludes: "database.db,product.db,database.db-wal,database.db-shm,product.db-wal,product.db-shm,database.db-journal,product.db-journal"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MySourceDir}\*"; DestDir: "{app}"; Excludes: "database.db,product.db,database.db-wal,database.db-shm,product.db-wal,product.db-shm,database.db-journal,product.db-journal"; Flags: ignoreversion
+Source: "{#MySourceDir}\x64\*"; DestDir: "{app}\x64"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MySourceDir}\x86\*"; DestDir: "{app}\x86"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MySourceDir}\AnnouncementServer\*"; DestDir: "{app}\AnnouncementServer"; Flags: ignoreversion onlyifdoesntexist recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\SX3 Scanner"; Filename: "{app}{#MyAppExeName}"
@@ -66,7 +69,6 @@ Name: "{commondesktop}\SX3 Scanner"; Filename: "{app}{#MyAppExeName}"; Tasks: de
 
 [Run]
 Filename: "{sys}\schtasks.exe"; Parameters: "/Create /F /TN ""SX3 Scanner"" /TR ""{app}\{#MyAppExeName}"" /SC ONLOGON /RL HIGHEST"; Flags: runhidden waituntilterminated
-Filename: "{app}\AnnouncementServer\SX3.AnnouncementServer.exe"; Flags: nowait skipifsilent
 Filename: "{app}\{#MyAppExeName}"; Description: "Open SX3 Scanner"; Flags: nowait postinstall skipifsilent
 
 [Code]

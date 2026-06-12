@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading.Channels;
 
 AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
@@ -31,6 +32,8 @@ try
         builder.Configuration["AnnouncementServer:Urls"] ??
         "http://0.0.0.0:5088");
     builder.Services.AddSingleton<AnnouncementBroker>();
+    builder.Services.AddHttpClient();
+    builder.Services.AddHostedService<AnnouncementGitHubPollingService>();
     builder.Services.AddHostedService<AnnouncementFileWatcherService>();
     builder.Services.AddHostedService<AnnouncementShutdownService>();
     builder.Services.AddHostedService<ParentProcessMonitorService>();
@@ -353,12 +356,13 @@ internal sealed class AnnouncementBroker
 
     public async Task PublishAsync(string json, CancellationToken token)
     {
+        string normalized = ValidateAndNormalize(json);
         await _publishLock.WaitAsync(token);
         try
         {
-            await WriteAtomicallyAsync(json, token);
-            Volatile.Write(ref _currentJson, json);
-            await BroadcastAsync(json);
+            await WriteAtomicallyAsync(normalized, token);
+            Volatile.Write(ref _currentJson, normalized);
+            await BroadcastAsync(normalized);
         }
         finally
         {
@@ -395,21 +399,191 @@ internal sealed class AnnouncementBroker
         if (Encoding.UTF8.GetByteCount(json) > MaximumAnnouncementBytes)
             throw new InvalidDataException("Announcement JSON is too large.");
 
-        using JsonDocument document = JsonDocument.Parse(json);
-        if (document.RootElement.ValueKind != JsonValueKind.Object)
+        JsonNode? node = JsonNode.Parse(json);
+        if (node is not JsonObject root)
             throw new InvalidDataException(
                 "Announcement JSON root must be an object.");
+        using JsonDocument document = JsonDocument.Parse(json);
         if (ContainsInvalidEncoding(document.RootElement))
             throw new InvalidDataException(
                 "Announcement JSON contains invalid cached encoding.");
 
-        return JsonSerializer.Serialize(
-            document.RootElement,
+        NormalizeAnnouncement(root);
+        return root.ToJsonString(
             new JsonSerializerOptions
             {
                 Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
                 WriteIndented = true
             });
+    }
+
+    private static void NormalizeAnnouncement(JsonObject root)
+    {
+        root["enabled"] = ReadBoolean(root, "enabled", false);
+        root["mode"] = NormalizeMode(ReadString(root, "mode", "single"));
+        root["level"] = NormalizeLevel(ReadString(root, "level", "info"));
+        root["updatedAt"] = NormalizeText(
+            ReadString(root, "updatedAt", string.Empty));
+        root["version"] = NormalizeText(
+            ReadString(root, "version", string.Empty));
+        root["createdBy"] = NormalizeText(
+            ReadString(root, "createdBy", string.Empty));
+        root["title"] = NormalizeText(
+            ReadString(root, "title", "THÔNG BÁO HỆ THỐNG"),
+            "THÔNG BÁO HỆ THỐNG");
+        root["message"] = NormalizeText(ReadString(root, "message", string.Empty));
+        root["autoHideSeconds"] = Math.Max(0, ReadInt(root, "autoHideSeconds", 0));
+        root["showCountdown"] = ReadBoolean(root, "showCountdown", false);
+        root["pollSeconds"] = Math.Max(5, ReadInt(root, "pollSeconds", 15));
+        root["rotateSeconds"] = Math.Max(3, ReadInt(root, "rotateSeconds", 10));
+        root["repeatSeconds"] = Math.Max(0, ReadInt(root, "repeatSeconds", 600));
+        root["showPopup"] = ReadBoolean(root, "showPopup", false);
+        root["allowClose"] = ReadBoolean(root, "allowClose", false);
+        root["forceUpdate"] = ReadBoolean(root, "forceUpdate", false);
+        root["priority"] = Math.Max(0, ReadInt(root, "priority", 0));
+        root["marqueeEnabled"] = ReadBoolean(
+            root,
+            "marqueeEnabled",
+            false);
+        root["marqueeSpeed"] = Math.Max(1, ReadInt(root, "marqueeSpeed", 80));
+        root["marqueeDelaySeconds"] = Math.Max(
+            0,
+            ReadInt(root, "marqueeDelaySeconds", 10));
+        root["marqueeDirection"] = string.Equals(
+            ReadString(root, "marqueeDirection", "rightToLeft"),
+            "leftToRight",
+            StringComparison.OrdinalIgnoreCase)
+                ? "leftToRight"
+                : "rightToLeft";
+        root["backgroundColor"] = NormalizeColor(
+            ReadString(root, "backgroundColor", string.Empty));
+        root["foregroundColor"] = NormalizeColor(
+            ReadString(root, "foregroundColor", string.Empty));
+
+        if (root["messages"] is not JsonArray messages)
+        {
+            root["messages"] = new JsonArray();
+            return;
+        }
+
+        for (int index = messages.Count - 1; index >= 0; index--)
+        {
+            if (messages[index] is not JsonObject message)
+            {
+                messages.RemoveAt(index);
+                continue;
+            }
+
+            string messageText = NormalizeText(
+                ReadString(message, "message", string.Empty));
+            if (string.IsNullOrWhiteSpace(messageText))
+            {
+                messages.RemoveAt(index);
+                continue;
+            }
+
+            message["message"] = messageText;
+            message["level"] = NormalizeLevel(
+                ReadString(message, "level", "info"));
+            message["title"] = NormalizeText(
+                ReadString(message, "title", "THÔNG BÁO HỆ THỐNG"),
+                "THÔNG BÁO HỆ THỐNG");
+            message["backgroundColor"] = NormalizeColor(
+                ReadString(message, "backgroundColor", string.Empty));
+            message["foregroundColor"] = NormalizeColor(
+                ReadString(message, "foregroundColor", string.Empty));
+            if (message.ContainsKey("autoHideSeconds"))
+            {
+                message["autoHideSeconds"] = Math.Max(
+                    0,
+                    ReadInt(message, "autoHideSeconds", 0));
+            }
+        }
+    }
+
+    private static string ReadString(
+        JsonObject value,
+        string propertyName,
+        string defaultValue)
+    {
+        JsonNode? node = value[propertyName];
+        if (node == null)
+            return defaultValue;
+        if (node.GetValueKind() != JsonValueKind.String)
+            throw new InvalidDataException(
+                $"Announcement property '{propertyName}' must be a string.");
+        return node.GetValue<string>();
+    }
+
+    private static int ReadInt(
+        JsonObject value,
+        string propertyName,
+        int defaultValue)
+    {
+        JsonNode? node = value[propertyName];
+        if (node == null)
+            return defaultValue;
+        if (node is not JsonValue jsonValue ||
+            !jsonValue.TryGetValue<int>(out int result))
+            throw new InvalidDataException(
+                $"Announcement property '{propertyName}' must be an integer.");
+        return result;
+    }
+
+    private static bool ReadBoolean(
+        JsonObject value,
+        string propertyName,
+        bool defaultValue)
+    {
+        JsonNode? node = value[propertyName];
+        if (node == null)
+            return defaultValue;
+        if (node is not JsonValue jsonValue ||
+            !jsonValue.TryGetValue<bool>(out bool result))
+            throw new InvalidDataException(
+                $"Announcement property '{propertyName}' must be a boolean.");
+        return result;
+    }
+
+    private static string NormalizeMode(string value)
+    {
+        return string.Equals(
+            value?.Trim(),
+            "playlist",
+            StringComparison.OrdinalIgnoreCase)
+                ? "playlist"
+                : "single";
+    }
+
+    private static string NormalizeLevel(string value)
+    {
+        string normalized = (value ?? string.Empty).Trim().ToLowerInvariant();
+        return normalized is "warning" or "error" or "success"
+            ? normalized
+            : "info";
+    }
+
+    private static string NormalizeText(
+        string value,
+        string defaultValue = "")
+    {
+        string normalized = value?.Trim() ?? string.Empty;
+        return normalized.Length == 0 ? defaultValue : normalized;
+    }
+
+    private static string NormalizeColor(string value)
+    {
+        string normalized = value?.Trim() ?? string.Empty;
+        if (normalized.Length != 7 || normalized[0] != '#')
+            return string.Empty;
+
+        for (int index = 1; index < normalized.Length; index++)
+        {
+            if (!Uri.IsHexDigit(normalized[index]))
+                return string.Empty;
+        }
+
+        return normalized.ToUpperInvariant();
     }
 
     private static bool ContainsInvalidEncoding(JsonElement element)
@@ -648,6 +822,122 @@ internal sealed class AnnouncementBroker
             }
         }
 
+    }
+}
+
+internal sealed class AnnouncementGitHubPollingService : BackgroundService
+{
+    private const string DefaultGitHubRawUrl =
+        "https://raw.githubusercontent.com/hieuvipro94x/sx3-scanner-release/main/announcement.json";
+    private readonly AnnouncementBroker _broker;
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IConfiguration _configuration;
+    private readonly ILogger<AnnouncementGitHubPollingService> _logger;
+    private string? _lastFingerprint;
+
+    public AnnouncementGitHubPollingService(
+        AnnouncementBroker broker,
+        IHttpClientFactory httpClientFactory,
+        IConfiguration configuration,
+        ILogger<AnnouncementGitHubPollingService> logger)
+    {
+        _broker = broker;
+        _httpClientFactory = httpClientFactory;
+        _configuration = configuration;
+        _logger = logger;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        int configuredSeconds = _configuration.GetValue<int?>(
+            "AnnouncementServer:GitHubPollSeconds") ?? 15;
+        TimeSpan pollInterval = TimeSpan.FromSeconds(
+            Math.Max(5, Math.Min(configuredSeconds, 300)));
+
+        await PollOnceAsync(stoppingToken);
+        using var timer = new PeriodicTimer(pollInterval);
+        while (await timer.WaitForNextTickAsync(stoppingToken))
+            await PollOnceAsync(stoppingToken);
+    }
+
+    private async Task PollOnceAsync(CancellationToken token)
+    {
+        string sourceUrl =
+            _configuration["AnnouncementServer:GitHubRawUrl"] ??
+            DefaultGitHubRawUrl;
+        string requestUrl = sourceUrl +
+            (sourceUrl.Contains('?') ? "&" : "?") +
+            "t=" + DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+        _logger.LogInformation("[Announcement] Poll GitHub...");
+
+        try
+        {
+            HttpClient client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(10);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(
+                "SX3AnnouncementServer");
+            client.DefaultRequestHeaders.CacheControl =
+                new System.Net.Http.Headers.CacheControlHeaderValue
+                {
+                    NoCache = true,
+                    NoStore = true
+                };
+
+            using HttpResponseMessage response = await client.GetAsync(
+                requestUrl,
+                HttpCompletionOption.ResponseContentRead,
+                token);
+            response.EnsureSuccessStatusCode();
+
+            string json = await response.Content.ReadAsStringAsync(token);
+            string fingerprint = BuildFingerprint(json);
+            if (string.Equals(
+                fingerprint,
+                _lastFingerprint,
+                StringComparison.Ordinal))
+            {
+                _logger.LogInformation("[Announcement] No changes.");
+                return;
+            }
+
+            string normalized;
+            try
+            {
+                normalized = AnnouncementBroker.ValidateAndNormalize(json);
+            }
+            catch (Exception ex) when (
+                ex is JsonException or InvalidDataException)
+            {
+                _logger.LogError(
+                    ex,
+                    "[Announcement] Invalid JSON, ignored.");
+                return;
+            }
+
+            _logger.LogInformation(
+                "[Announcement] Changed detected. Broadcasting...");
+            await _broker.PublishAsync(normalized, token);
+            _lastFingerprint = fingerprint;
+            _logger.LogInformation(
+                "[Announcement] Broadcast completed. Client count: {ClientCount}",
+                _broker.ConnectedClientCount);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "[Announcement] GitHub poll failed; keeping the last valid announcement.");
+        }
+    }
+
+    private static string BuildFingerprint(string json)
+    {
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(json ?? string.Empty));
+        return Convert.ToHexString(hash);
     }
 }
 

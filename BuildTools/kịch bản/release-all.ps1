@@ -233,6 +233,7 @@ Huong dan cai dat:
 
 $ProjectRoot = Get-ProjectRoot
 $BuildToolsDir = Join-Path $ProjectRoot "BuildTools"
+$ReleaseOutputDir = Join-Path $ProjectRoot "ReleaseOutput"
 $OutputDir = Join-Path $ProjectRoot "InstallerOutput"
 $PackageDir = Join-Path $OutputDir "PackageFiles"
 $BinRelease = Join-Path $ProjectRoot "bin\$Platform\$Configuration"
@@ -271,9 +272,42 @@ Info "Output: $OutputDir"
 $MSBuild = Find-MSBuild
 Ok "MSBuild: $MSBuild"
 
+Info "`nDon artifact cu truoc khi build..."
+if (Test-Path -LiteralPath $ReleaseOutputDir) {
+    $resolvedReleaseOutput = [IO.Path]::GetFullPath($ReleaseOutputDir)
+    $resolvedProjectRoot = [IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\')
+    if (-not $resolvedReleaseOutput.StartsWith(
+        $resolvedProjectRoot + '\',
+        [StringComparison]::OrdinalIgnoreCase)) {
+        Fail "Tu choi xoa thu muc ngoai project: $resolvedReleaseOutput"
+    }
+    Remove-Item -LiteralPath $resolvedReleaseOutput -Recurse -Force
+}
+
+if (Test-Path -LiteralPath $OutputDir) {
+    $resolvedOutputDir = [IO.Path]::GetFullPath($OutputDir)
+    $resolvedProjectRoot = [IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\')
+    if (-not $resolvedOutputDir.StartsWith(
+        $resolvedProjectRoot + '\',
+        [StringComparison]::OrdinalIgnoreCase)) {
+        Fail "Tu choi xoa thu muc ngoai project: $resolvedOutputDir"
+    }
+    Remove-Item -LiteralPath $resolvedOutputDir -Recurse -Force
+}
+
+if (Test-Path -LiteralPath $BinRelease) {
+    Get-ChildItem -LiteralPath $BinRelease -Filter "SX3.AnnouncementServer.*" -File |
+        Remove-Item -Force
+}
+
 Info "`n[0/5] Build $Configuration|$Platform..."
 & $MSBuild $ProjectFile /t:Rebuild /p:Configuration=$Configuration /p:Platform=$Platform /m
 Assert-LastExitCode "MSBuild $Configuration|$Platform"
+
+if (Test-Path -LiteralPath $BinRelease) {
+    Get-ChildItem -LiteralPath $BinRelease -Filter "SX3.AnnouncementServer.*" -File |
+        Remove-Item -Force
+}
 
 $Exe = Join-Path $BinRelease "SX3 SCANER.exe"
 if (-not (Test-Path $Exe)) {
@@ -283,15 +317,20 @@ if (-not (Test-Path $Exe)) {
 $InnoCompiler = Find-InnoSetup
 Ok "Inno Setup: $InnoCompiler"
 
-if (Test-Path $OutputDir) {
-    Remove-Item $OutputDir -Recurse -Force
-}
-
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 New-Item -ItemType Directory -Force -Path $PackageDir | Out-Null
 
 Info "`n[1/5] Copy bin\Release vao PackageFiles..."
 Copy-Item -Path (Join-Path $BinRelease "*") -Destination $PackageDir -Recurse -Force
+
+$PackagedServer = Join-Path $PackageDir "AnnouncementServer\SX3.AnnouncementServer.exe"
+$UnexpectedRootServer = Join-Path $PackageDir "SX3.AnnouncementServer.exe"
+if (-not (Test-Path -LiteralPath $PackagedServer)) {
+    Fail "Khong tim thay Announcement Server trong package: $PackagedServer"
+}
+if (Test-Path -LiteralPath $UnexpectedRootServer) {
+    Fail "Package khong hop le: Announcement Server khong duoc nam o root."
+}
 
 Info "`n[2/5] Copy release-note.txt..."
 Copy-Item -Path $ReleaseNote.Path -Destination (Join-Path $PackageDir "release-note.txt") -Force
@@ -360,7 +399,10 @@ Type: files; Name: "{userstartup}\SX3 SCANER.lnk"
 Type: files; Name: "{commonstartup}\SX3 SCANER.lnk"
 
 [Files]
-Source: "$EscapedPackageDir\*"; DestDir: "{app}"; Excludes: "database.db,product.db,database.db-wal,database.db-shm,product.db-wal,product.db-shm,database.db-journal,product.db-journal"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "$EscapedPackageDir\*"; DestDir: "{app}"; Excludes: "database.db,product.db,database.db-wal,database.db-shm,product.db-wal,product.db-shm,database.db-journal,product.db-journal"; Flags: ignoreversion
+Source: "$EscapedPackageDir\x64\*"; DestDir: "{app}\x64"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "$EscapedPackageDir\x86\*"; DestDir: "{app}\x86"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "$EscapedPackageDir\AnnouncementServer\*"; DestDir: "{app}\AnnouncementServer"; Flags: ignoreversion onlyifdoesntexist recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\SX3 Scanner"; Filename: "{app}\{#MyAppExeName}"
@@ -369,7 +411,6 @@ Name: "{commondesktop}\SX3 Scanner"; Filename: "{app}\{#MyAppExeName}"; Tasks: d
 
 [Run]
 Filename: "{sys}\schtasks.exe"; Parameters: "/Create /F /TN ""SX3 Scanner"" /TR ""{app}\{#MyAppExeName}"" /SC ONLOGON /RL HIGHEST"; Flags: runhidden waituntilterminated
-Filename: "{app}\AnnouncementServer\SX3.AnnouncementServer.exe"; Flags: nowait skipifsilent
 Filename: "{app}\{#MyAppExeName}"; Description: "Open SX3 Scanner"; Flags: nowait postinstall skipifsilent
 
 [Code]

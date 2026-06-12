@@ -1,8 +1,6 @@
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -25,73 +23,101 @@ namespace SX3_SCANER.Helper
         private EventWaitHandle _shutdownEvent;
         private bool _disposed;
 
-        public void Start()
+        public bool Start()
         {
             lock (_syncRoot)
             {
-                ThrowIfDisposed();
-
-                if (_process != null && !_process.HasExited)
-                    return;
-
-                Process existingProcess = FindExistingProcess();
-                if (existingProcess != null)
-                {
-                    StartupManager.Log(
-                        "[Announcement] Server is already running. PID=" +
-                        existingProcess.Id);
-                    existingProcess.Dispose();
-                    WaitUntilReady();
-                    return;
-                }
-
-                if (IsServerReady())
-                {
-                    StartupManager.Log(
-                        "[Announcement] Announcement endpoint is already active.");
-                    return;
-                }
-
-                string executablePath = ResolveExecutablePath();
-                string workingDirectory = Path.GetDirectoryName(executablePath);
-                _shutdownEvent = new EventWaitHandle(
-                    false,
-                    EventResetMode.ManualReset,
-                    ShutdownEventName);
-                _shutdownEvent.Reset();
-
-                int parentProcessId;
-                using (Process currentProcess = Process.GetCurrentProcess())
-                    parentProcessId = currentProcess.Id;
-
-                var startInfo = new ProcessStartInfo
-                {
-                    FileName = executablePath,
-                    Arguments =
-                        "--ParentProcessId " + parentProcessId +
-                        " --ShutdownEventName \"" + ShutdownEventName + "\"",
-                    WorkingDirectory = workingDirectory,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    WindowStyle = ProcessWindowStyle.Hidden
-                };
-
-                StartupManager.Log(
-                    "[Announcement] Starting server: " + executablePath);
-                _process = Process.Start(startInfo);
-                if (_process == null)
-                    throw new InvalidOperationException("Process.Start returned null.");
-
                 try
                 {
+                    ThrowIfDisposed();
+
+                    if (_process != null && !_process.HasExited)
+                        return true;
+
+                    Process existingProcess = FindExistingProcess();
+                    if (existingProcess != null)
+                    {
+                        try
+                        {
+                            StartupManager.Log(
+                                "[Announcement] Server is already running. PID=" +
+                                existingProcess.Id);
+                            WaitUntilReady();
+                            return true;
+                        }
+                        finally
+                        {
+                            existingProcess.Dispose();
+                        }
+                    }
+
+                    if (IsServerReady())
+                    {
+                        StartupManager.Log(
+                            "[Announcement] Announcement endpoint is already active.");
+                        return true;
+                    }
+
+                    string executablePath = ResolveExecutablePath();
+                    if (!File.Exists(executablePath))
+                    {
+                        StartupManager.Log(
+                            "Không tìm thấy SX3.AnnouncementServer.exe, bỏ qua khởi động Announcement Server. Path=" +
+                            executablePath);
+                        return false;
+                    }
+
+                    string workingDirectory = Path.GetDirectoryName(executablePath);
+                    _shutdownEvent = new EventWaitHandle(
+                        false,
+                        EventResetMode.ManualReset,
+                        ShutdownEventName);
+                    _shutdownEvent.Reset();
+
+                    int parentProcessId;
+                    using (Process currentProcess = Process.GetCurrentProcess())
+                        parentProcessId = currentProcess.Id;
+
+                    var startInfo = new ProcessStartInfo
+                    {
+                        FileName = executablePath,
+                        Arguments =
+                            "--ParentProcessId " + parentProcessId +
+                            " --ShutdownEventName \"" + ShutdownEventName + "\"",
+                        WorkingDirectory = workingDirectory,
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        WindowStyle = ProcessWindowStyle.Hidden
+                    };
+
+                    StartupManager.Log(
+                        "[Announcement] Starting server: " + executablePath);
+                    _process = Process.Start(startInfo);
+                    if (_process == null)
+                        throw new InvalidOperationException("Process.Start returned null.");
+
                     WaitUntilReady();
                     StartupManager.Log(
                         "[Announcement] Server started. PID=" + _process.Id);
+                    return true;
                 }
-                catch
+                catch (Exception ex)
                 {
-                    StopOwnedProcess();
-                    throw;
+                    try
+                    {
+                        StopOwnedProcess();
+                    }
+                    catch (Exception cleanupException)
+                    {
+                        StartupManager.Log(
+                            "[Announcement] Failed to clean up after startup error: " +
+                            cleanupException);
+                    }
+
+                    StartupManager.Log(
+                        "Announcement Server khởi động thất bại, tính năng thông báo online sẽ bị tắt. Chi tiết: " +
+                        ex);
+                    return false;
                 }
             }
         }
@@ -229,7 +255,7 @@ namespace SX3_SCANER.Helper
         private static Process FindExistingProcess()
         {
             Process[] processes = Process.GetProcessesByName(ProcessName);
-            Process selected = processes.FirstOrDefault();
+            Process selected = processes.Length > 0 ? processes[0] : null;
 
             foreach (Process process in processes)
             {
@@ -242,55 +268,10 @@ namespace SX3_SCANER.Helper
 
         private static string ResolveExecutablePath()
         {
-            string baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
-            var candidates = new List<string>();
-
-#if DEBUG
-            string solutionRoot = FindSolutionRoot(baseDirectory);
-            if (solutionRoot != null)
-            {
-                candidates.Add(Path.Combine(
-                    solutionRoot,
-                    "AnnouncementServer",
-                    "bin",
-                    "Debug",
-                    "net8.0",
-                    ExecutableName));
-            }
-#endif
-
-            candidates.Add(Path.Combine(
-                baseDirectory,
+            return Path.Combine(
+                AppDomain.CurrentDomain.BaseDirectory,
                 "AnnouncementServer",
-                ExecutableName));
-            candidates.Add(Path.Combine(baseDirectory, ExecutableName));
-
-            string executablePath = candidates.FirstOrDefault(File.Exists);
-            if (executablePath != null)
-                return executablePath;
-
-            throw new FileNotFoundException(
-                "Announcement server executable was not found. Checked: " +
-                string.Join(", ", candidates),
-                candidates.First());
-        }
-
-        private static string FindSolutionRoot(string startDirectory)
-        {
-            var directory = new DirectoryInfo(startDirectory);
-            while (directory != null)
-            {
-                string projectPath = Path.Combine(
-                    directory.FullName,
-                    "AnnouncementServer",
-                    "SX3.AnnouncementServer.csproj");
-                if (File.Exists(projectPath))
-                    return directory.FullName;
-
-                directory = directory.Parent;
-            }
-
-            return null;
+                ExecutableName);
         }
 
         private static void WaitUntilReady()

@@ -277,6 +277,8 @@ namespace SX3_SCANER.ViewModel
                 }
                 System.Diagnostics.Debug.WriteLine(
                     "[Announcement] Playlist restarted.");
+                StartupManager.Log(
+                    "[Announcement] Playlist restarted.");
 
                 return;
             }

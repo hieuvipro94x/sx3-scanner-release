@@ -39,7 +39,22 @@ namespace SX3_SCANER
                 });
 
                 _announcementServerRunner = new AnnouncementServerRunner();
-                await Task.Run(() => _announcementServerRunner.Start());
+                try
+                {
+                    bool announcementStarted = await Task.Run(
+                        () => _announcementServerRunner.Start());
+                    if (!announcementStarted)
+                    {
+                        StartupManager.SetStatus(
+                            "Announcement Server không khả dụng; tiếp tục khởi động Scanner.");
+                    }
+                }
+                catch (Exception announcementException)
+                {
+                    StartupManager.Log(
+                        "Announcement Server gặp lỗi ngoài dự kiến; Scanner vẫn tiếp tục khởi động. Chi tiết: " +
+                        announcementException);
+                }
 
                 StartupManager.SetStatus("Đang tải cấu hình...");
                 MainWindow mainWindow = new MainWindow
