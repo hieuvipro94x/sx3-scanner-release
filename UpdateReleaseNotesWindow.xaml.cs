@@ -12,7 +12,7 @@ namespace SX3_SCANER
     {
         public bool Accepted { get; private set; }
 
-        public UpdateReleaseNotesWindow(string currentVersion, GitHubReleaseUpdateInfo update)
+        public UpdateReleaseNotesWindow(string currentVersion, UpdateInfo update)
         {
             InitializeComponent();
 
@@ -20,7 +20,7 @@ namespace SX3_SCANER
             txtNewVersion.Text = "V" + update.Version;
             txtFileName.Text = update.FileName;
             txtFileSize.Text = FormatFileSize(update.FileSize);
-            txtReleaseSource.Text = GitHubReleaseUpdateService.ReleasesPageUrl;
+            txtReleaseSource.Text = UpdateService.ReleasesPageUrl;
 
             SetReleaseNotesMarkdown(update.ReleaseNotes);
 

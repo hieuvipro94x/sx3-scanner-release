@@ -1,7 +1,9 @@
 {
-"version": "7.2.2",
-"tagName": "v7.2.2",
-"fileName": "SX3ScannerSetup-7.2.2.exe",
-"downloadUrl": "https://github.com/hieuvipro94x/sx3-scanner-release/releases/download/v7.2.2/SX3ScannerSetup-7.2.2.exe",
-"releaseNotes": "# SX3 Scanner v7.2.1\n\n## 🆕 Tính năng mới\n\n### Hệ thống Thông báo Online (Announcement System)\n- Bổ sung hệ thống thông báo online tập trung.\n- Hỗ trợ tải cấu hình thông báo từ máy chủ/GitHub mà không cần cập nhật ứng dụng.\n- Hỗ trợ hiển thị nhiều thông báo theo chế độ Playlist.\n- Hỗ trợ chữ chạy (Marquee) cho các nội dung dài.\n- Hỗ trợ tùy chỉnh màu nền, màu chữ và mức độ ưu tiên của từng thông báo.\n- Hỗ trợ hiển thị các thông báo về sản xuất, chất lượng, đóng gói và an toàn lao động.\n\n## ⚡ Cải tiến\n- Tự động phát hiện thay đổi nội dung cấu hình thông báo.\n- Tự động cập nhật thông báo mới mà không cần khởi động lại phần mềm.\n- Tối ưu cơ chế cache giúp giảm tải truy cập mạng.\n- Tăng độ ổn định khi mất kết nối máy chủ thông báo.\n\n## ⚙️ Quản trị\n- Có thể chỉnh sửa nội dung thông báo trực tiếp trên file announcement.json.\n- Không cần build lại ứng dụng khi thay đổi nội dung thông báo.\n- Hỗ trợ cấu hình thời gian hiển thị, thời gian lặp lại và hiệu ứng chữ chạy.\n\n## 🛠 Sửa lỗi\n- Cải thiện xử lý dữ liệu thông báo không hợp lệ.\n- Tăng khả năng khôi phục khi mất kết nối nguồn dữ liệu thông báo.\n- Tối ưu hiển thị danh sách thông báo nhiều nội dung liên tiếp.\n- Cải thiện độ ổn định của hệ thống thông báo online."
+  "version": "7.5.2",
+  "tagName": "v7.5.2",
+  "fileName": "SX3ScannerSetup-7.5.2.exe",
+  "fileSize": 8372740,
+  "downloadUrl": "https://github.com/hieuvipro94x/sx3-scanner-release/releases/download/v7.5.2/SX3ScannerSetup-7.5.2.exe",
+  "sha256": "59a327b0561112424290d9d2f117447cf0286f9fee23b3e42ce081c5208889b9",
+  "releaseNotes": "# SX3 Scanner v7.5.2\n\nCập nhật về độ ổn định và hiệu năng.\n\nManifest này chỉ được giữ để các phiên bản cũ như v7.2.2 chuyển tiếp sang updater mới dùng GitHub Releases API."
 }

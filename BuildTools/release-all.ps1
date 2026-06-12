@@ -245,33 +245,48 @@ Name: "{group}\Release note"; Filename: "{app}\release-note.txt"
 Name: "{commondesktop}\SX3 Scanner"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{sys}\schtasks.exe"; Parameters: "/Create /F /TN ""SX3 Scanner"" /TR ""{app}\{#MyAppExeName}"" /SC ONLOGON /RL HIGHEST"; Flags: runhidden waituntilterminated
 Filename: "{app}\AnnouncementServer\SX3.AnnouncementServer.exe"; Flags: nowait skipifsilent
 Filename: "{app}\{#MyAppExeName}"; Description: "Open SX3 Scanner"; Flags: nowait postinstall skipifsilent
 
-[UninstallRun]
-Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM SX3.AnnouncementServer.exe"; Flags: runhidden waituntilterminated; RunOnceId: "KillAnnouncementServer"
-Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM ""SX3 SCANER.exe"""; Flags: runhidden waituntilterminated; RunOnceId: "KillSX3Scanner"
-Filename: "{sys}\schtasks.exe"; Parameters: "/Delete /F /TN ""SX3 Scanner"""; Flags: runhidden waituntilterminated; RunOnceId: "DeleteSX3ScannerTask"
-
 [Code]
-procedure KillProcessByName(FileName: string);
+const
+  AnnouncementShutdownEvent = 'Local\SX3_AnnouncementServer_Shutdown';
+  EVENT_MODIFY_STATE = `$0002;
+
+function OpenEvent(dwDesiredAccess: LongWord; bInheritHandle: Boolean;
+  lpName: string): THandle;
+  external 'OpenEventW@kernel32.dll stdcall';
+function SetEvent(hEvent: THandle): Boolean;
+  external 'SetEvent@kernel32.dll stdcall';
+function CloseHandle(hObject: THandle): Boolean;
+  external 'CloseHandle@kernel32.dll stdcall';
+
+procedure StopAnnouncementServer;
 var
-  ResultCode: Integer;
+  ShutdownEvent: THandle;
 begin
-  Exec(ExpandConstant('{sys}\taskkill.exe'),
-       '/F /IM "' + FileName + '"',
-       '',
-       SW_HIDE,
-       ewWaitUntilTerminated,
-       ResultCode);
+  ShutdownEvent := OpenEvent(
+    EVENT_MODIFY_STATE,
+    False,
+    AnnouncementShutdownEvent);
+  if ShutdownEvent <> 0 then
+  begin
+    SetEvent(ShutdownEvent);
+    CloseHandle(ShutdownEvent);
+    Sleep(3000);
+  end;
 end;
 
-function InitializeSetup(): Boolean;
+function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
-  KillProcessByName('SX3.AnnouncementServer.exe');
-  KillProcessByName('SX3 SCANER.exe');
-  Result := True;
+  StopAnnouncementServer;
+  Result := '';
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+    StopAnnouncementServer;
 end;
 "@
 

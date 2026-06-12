@@ -144,8 +144,8 @@
     </Compile>
     <Compile Include="Helper\AnnouncementServerRunner.cs" />
     <Compile Include="Helper\AppConfigHelper.cs" />
-    <Compile Include="Helper\GitHubReleaseUpdateInfo.cs" />
-    <Compile Include="Helper\GitHubReleaseUpdateService.cs" />
+    <Compile Include="Helper\UpdateInfo.cs" />
+    <Compile Include="Helper\UpdateService.cs" />
     <Compile Include="Helper\OnlineAnnouncementService.cs" />
     <Compile Include="Helper\ScanRowBrushConverters.cs" />
     <Compile Include="Helper\StartupManager.cs" />

@@ -1,8 +1,6 @@
 ﻿using SX3_SCANER.Helper;
 using System;
 using System.ComponentModel;
-using System.Configuration;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -20,9 +18,8 @@ namespace SX3_SCANER
         private readonly DispatcherTimer timer = new DispatcherTimer();
         private readonly string applicationVersion;
 
-        private readonly GitHubReleaseUpdateService _updateService =
-            new GitHubReleaseUpdateService();
-        private GitHubReleaseUpdateInfo availableUpdate;
+        private readonly UpdateService _updateService = new UpdateService();
+        private UpdateInfo availableUpdate;
         private INotifyPropertyChanged _announcementViewModel;
         private CancellationTokenSource _announcementMarqueeCts;
         private int _announcementMarqueeGeneration;
@@ -38,7 +35,7 @@ namespace SX3_SCANER
             txtStartupStatus.Text = StartupManager.CurrentStatus;
             AttachAnnouncementViewModel(DataContext as INotifyPropertyChanged);
 
-            applicationVersion = GetCurrentAppVersion();
+            applicationVersion = UpdateService.GetCurrentVersionString();
 
             if (txtAppVersion != null)
             {
@@ -51,27 +48,6 @@ namespace SX3_SCANER
 
             UpdateClock();
             Loaded += MainWindow_Loaded;
-        }
-
-        private string GetCurrentAppVersion()
-        {
-            string configuredVersion = ConfigurationManager.AppSettings["CurrentVersion"];
-            if (!string.IsNullOrWhiteSpace(configuredVersion))
-            {
-                return configuredVersion;
-            }
-
-            Assembly assembly = Assembly.GetExecutingAssembly();
-            var informationalVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>();
-
-            if (informationalVersion != null &&
-                !string.IsNullOrWhiteSpace(informationalVersion.InformationalVersion))
-            {
-                return informationalVersion.InformationalVersion.Split('+')[0];
-            }
-
-            Version version = assembly.GetName().Version;
-            return string.Format("{0}.{1}.{2}", version.Major, version.Minor, version.Build);
         }
 
         private void Timer_Tick(object sender, EventArgs e)
@@ -431,7 +407,7 @@ namespace SX3_SCANER
             updateNotificationDot.Visibility = Visibility.Collapsed;
             availableUpdate = null;
 
-            GitHubReleaseUpdateInfo update =
+            UpdateInfo update =
                 await _updateService.CheckForUpdateAsync(showErrorMessage);
             availableUpdate = update;
 
@@ -483,23 +459,26 @@ namespace SX3_SCANER
                 }
             }
 
-            // GỌI CỬA SỔ RELEASE NOTES Ở ĐÂY
-            bool accepted = ShowUpdateDetailDialog(availableUpdate);
-
-            if (!accepted)
-            {
-                txtUpdateStatus.Text = "Đã hủy cập nhật.";
-                btnSoftwareUpdate.IsEnabled = true;
-                updateNotificationDot.Visibility = Visibility.Visible;
-                return;
-            }
-
-            txtUpdateStatus.Text = "Đang tải và cài đặt bản cập nhật...";
+            txtUpdateStatus.Text = "Đang tải và xác thực bản cập nhật...";
             bool installerStarted = false;
 
             try
             {
-                installerStarted = await _updateService.DownloadRunAndExitAsync(availableUpdate);
+                string installerPath =
+                    await _updateService.DownloadAndVerifyAsync(availableUpdate);
+                txtUpdateStatus.Text = "Bản cập nhật đã được xác thực.";
+
+                bool accepted = ShowUpdateDetailDialog(availableUpdate);
+                if (!accepted)
+                {
+                    txtUpdateStatus.Text = "Đã hủy cập nhật.";
+                    btnSoftwareUpdate.IsEnabled = true;
+                    updateNotificationDot.Visibility = Visibility.Visible;
+                    return;
+                }
+
+                installerStarted =
+                    _updateService.TryStartInstallerAndExit(installerPath);
 
                 if (installerStarted)
                 {
@@ -509,7 +488,13 @@ namespace SX3_SCANER
                     return;
                 }
 
-                await RefreshUpdateStatusAsync(false);
+                btnSoftwareUpdate.IsEnabled = true;
+            }
+            catch (Exception ex)
+            {
+                _updateService.ReportDownloadError(ex);
+                txtUpdateStatus.Text = _updateService.LastStatusMessage;
+                btnSoftwareUpdate.IsEnabled = true;
             }
             finally
             {
@@ -527,7 +512,7 @@ namespace SX3_SCANER
             }
         }
 
-        private bool ShowUpdateDetailDialog(GitHubReleaseUpdateInfo update)
+        private bool ShowUpdateDetailDialog(UpdateInfo update)
         {
             var detailWindow = new UpdateReleaseNotesWindow(applicationVersion, update)
             {

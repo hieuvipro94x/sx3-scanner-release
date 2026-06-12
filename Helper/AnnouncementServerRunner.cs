@@ -13,6 +13,8 @@ namespace SX3_SCANER.Helper
     {
         private const string ProcessName = "SX3.AnnouncementServer";
         private const string ExecutableName = "SX3.AnnouncementServer.exe";
+        private const string ShutdownEventName =
+            @"Local\SX3_AnnouncementServer_Shutdown";
         private const string ReadyUrl = "http://127.0.0.1:5088/health";
         private static readonly TimeSpan StartupTimeout = TimeSpan.FromSeconds(10);
         private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(2);
@@ -52,13 +54,11 @@ namespace SX3_SCANER.Helper
 
                 string executablePath = ResolveExecutablePath();
                 string workingDirectory = Path.GetDirectoryName(executablePath);
-                string shutdownEventName =
-                    @"Local\SX3_AnnouncementServer_Shutdown_" + Guid.NewGuid().ToString("N");
-
                 _shutdownEvent = new EventWaitHandle(
                     false,
                     EventResetMode.ManualReset,
-                    shutdownEventName);
+                    ShutdownEventName);
+                _shutdownEvent.Reset();
 
                 int parentProcessId;
                 using (Process currentProcess = Process.GetCurrentProcess())
@@ -69,7 +69,7 @@ namespace SX3_SCANER.Helper
                     FileName = executablePath,
                     Arguments =
                         "--ParentProcessId " + parentProcessId +
-                        " --ShutdownEventName \"" + shutdownEventName + "\"",
+                        " --ShutdownEventName \"" + ShutdownEventName + "\"",
                     WorkingDirectory = workingDirectory,
                     UseShellExecute = false,
                     CreateNoWindow = true,
@@ -128,8 +128,9 @@ namespace SX3_SCANER.Helper
 
             if (process == null)
             {
-                DisposeShutdownEvent();
+                SignalSharedShutdownEvent();
                 StopExistingProcesses();
+                DisposeShutdownEvent();
                 return;
             }
 
@@ -146,7 +147,7 @@ namespace SX3_SCANER.Helper
                     StartupManager.Log(
                         "[Announcement] Stopping server. PID=" + process.Id);
                     process.CloseMainWindow();
-                    _shutdownEvent?.Set();
+                    SignalSharedShutdownEvent();
 
                     if (!process.WaitForExit((int)ShutdownTimeout.TotalMilliseconds))
                     {
@@ -204,6 +205,25 @@ namespace SX3_SCANER.Helper
         {
             _shutdownEvent?.Dispose();
             _shutdownEvent = null;
+        }
+
+        private void SignalSharedShutdownEvent()
+        {
+            try
+            {
+                if (_shutdownEvent == null)
+                {
+                    _shutdownEvent = EventWaitHandle.OpenExisting(
+                        ShutdownEventName);
+                }
+
+                _shutdownEvent.Set();
+            }
+            catch (WaitHandleCannotBeOpenedException)
+            {
+                StartupManager.Log(
+                    "[Announcement] Shared shutdown event is not available.");
+            }
         }
 
         private static Process FindExistingProcess()

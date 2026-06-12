@@ -830,6 +830,8 @@ internal sealed class AnnouncementShutdownService : IHostedService
 
 internal sealed class ParentProcessMonitorService : BackgroundService
 {
+    private const string DefaultShutdownEventName =
+        @"Local\SX3_AnnouncementServer_Shutdown";
     private static readonly TimeSpan PollInterval =
         TimeSpan.FromMilliseconds(500);
 
@@ -856,20 +858,18 @@ internal sealed class ParentProcessMonitorService : BackgroundService
             return;
         }
 
-        if (!int.TryParse(
-                _configuration["ParentProcessId"],
-                out int parentProcessId) ||
-            string.IsNullOrWhiteSpace(
-                _configuration["ShutdownEventName"]))
-        {
-            _logger.LogInformation(
-                "No parent process configured; lifecycle monitoring is disabled.");
-            return;
-        }
-
-        string shutdownEventName = _configuration["ShutdownEventName"]!;
-        using EventWaitHandle shutdownEvent =
-            EventWaitHandle.OpenExisting(shutdownEventName);
+        int parentProcessId;
+        bool hasParentProcess = int.TryParse(
+            _configuration["ParentProcessId"],
+            out parentProcessId);
+        string shutdownEventName =
+            _configuration["ShutdownEventName"] ??
+            DefaultShutdownEventName;
+        using var shutdownEvent = new EventWaitHandle(
+            false,
+            EventResetMode.ManualReset,
+            shutdownEventName);
+        shutdownEvent.Reset();
 
         try
         {
@@ -884,25 +884,36 @@ internal sealed class ParentProcessMonitorService : BackgroundService
         if (stoppingToken.IsCancellationRequested)
             return;
 
-        Process? parentProcess;
-        try
+        Process? parentProcess = null;
+        if (hasParentProcess)
         {
-            parentProcess = Process.GetProcessById(parentProcessId);
-        }
-        catch (ArgumentException)
-        {
-            _lifetime.StopApplication();
-            _logger.LogWarning(
-                "Parent process {ParentProcessId} is no longer running.",
-                parentProcessId);
-            return;
+            try
+            {
+                parentProcess = Process.GetProcessById(parentProcessId);
+            }
+            catch (ArgumentException)
+            {
+                _lifetime.StopApplication();
+                _logger.LogWarning(
+                    "Parent process {ParentProcessId} is no longer running.",
+                    parentProcessId);
+                return;
+            }
         }
 
         using (parentProcess)
         {
-            _logger.LogInformation(
-                "Monitoring parent process {ParentProcessId}.",
-                parentProcessId);
+            if (parentProcess != null)
+            {
+                _logger.LogInformation(
+                    "Monitoring parent process {ParentProcessId}.",
+                    parentProcessId);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "No parent process configured; monitoring shared shutdown event.");
+            }
 
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -914,7 +925,7 @@ internal sealed class ParentProcessMonitorService : BackgroundService
                     return;
                 }
 
-                if (parentProcess.HasExited)
+                if (parentProcess != null && parentProcess.HasExited)
                 {
                     _lifetime.StopApplication();
                     _logger.LogWarning(
