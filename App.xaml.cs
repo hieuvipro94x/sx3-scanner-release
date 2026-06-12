@@ -58,10 +58,22 @@ namespace SX3_SCANER
             }
             catch (Exception ex)
             {
+                StartupManager.LogStartupError(
+                    ex,
+                    Model.Respository.DatabaseRepository.DatabasePath +
+                    " | " +
+                    Model.Respository.DatabaseRepository.ProductDatabasePath);
                 StartupManager.Log("Application startup failed: " + ex);
                 StartupManager.SetStatus("Không thể khởi động ứng dụng.");
+                string diagnosis = StartupManager.GetDatabaseDiagnosis(ex);
                 MessageBox.Show(
-                    "Không thể khởi động SX3 SCANER. Vui lòng kiểm tra database và thử lại.",
+                    "Không thể khởi động SX3 SCANER." +
+                    Environment.NewLine +
+                    "Nguyên nhân: " + diagnosis +
+                    Environment.NewLine +
+                    "Chi tiết: " + ex.Message +
+                    Environment.NewLine +
+                    "Log: " + StartupManager.ErrorLogPath,
                     "SX3 SCANER",
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);

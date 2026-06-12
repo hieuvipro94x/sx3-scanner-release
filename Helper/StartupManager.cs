@@ -13,6 +13,13 @@ namespace SX3_SCANER.Helper
         private static readonly HashSet<string> LoggedKeys =
             new HashSet<string>(StringComparer.Ordinal);
         private static readonly object LogSync = new object();
+        private static readonly string LocalDataDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SX3_SCANER");
+        private static readonly string StartupErrorLogPath = Path.Combine(
+            LocalDataDirectory,
+            "logs",
+            "startup-error.log");
         private static readonly string StartupLogPath = Path.Combine(
             Environment.GetFolderPath(
                 Environment.SpecialFolder.CommonApplicationData),
@@ -23,6 +30,11 @@ namespace SX3_SCANER.Helper
         private static string _currentStatus = "Đang khởi động ứng dụng...";
 
         internal static event Action<string> StatusChanged;
+
+        internal static string ErrorLogPath
+        {
+            get { return StartupErrorLogPath; }
+        }
 
         internal static string CurrentStatus
         {
@@ -152,6 +164,77 @@ namespace SX3_SCANER.Helper
             }
 
             Log(message);
+        }
+
+        internal static void LogStartupError(Exception exception, string databasePath)
+        {
+            Debug.WriteLine("[StartupError] " + exception);
+
+            try
+            {
+                lock (LogSync)
+                {
+                    string directory = Path.GetDirectoryName(StartupErrorLogPath);
+                    if (!string.IsNullOrEmpty(directory))
+                    {
+                        Directory.CreateDirectory(directory);
+                    }
+
+                    var builder = new StringBuilder();
+                    builder.AppendLine("============================================================");
+                    builder.AppendLine("Timestamp: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"));
+                    builder.AppendLine("Database path: " + (databasePath ?? "(unknown)"));
+                    builder.AppendLine("Exception type: " +
+                        (exception == null ? "(none)" : exception.GetType().FullName));
+                    builder.AppendLine("Exception message: " +
+                        (exception == null ? "(none)" : exception.Message));
+                    builder.AppendLine("SQLite diagnosis: " + GetDatabaseDiagnosis(exception));
+                    builder.AppendLine("Stack trace:");
+                    builder.AppendLine(
+                        exception == null || string.IsNullOrWhiteSpace(exception.StackTrace)
+                            ? "(not available)"
+                            : exception.StackTrace);
+                    builder.AppendLine("Database file state:");
+
+                    foreach (string fileName in new[]
+                    {
+                        "database.db",
+                        "database.db-wal",
+                        "database.db-shm",
+                        "product.db",
+                        "product.db-wal",
+                        "product.db-shm"
+                    })
+                    {
+                        string path = Path.Combine(LocalDataDirectory, fileName);
+                        builder.AppendLine(
+                            "  " + path + " | exists=" + File.Exists(path));
+                    }
+
+                    File.AppendAllText(
+                        StartupErrorLogPath,
+                        builder.ToString(),
+                        new UTF8Encoding(false));
+                }
+            }
+            catch
+            {
+                // Error logging must not hide the original startup exception.
+            }
+        }
+
+        internal static string GetDatabaseDiagnosis(Exception exception)
+        {
+            string details = exception == null ? string.Empty : exception.ToString();
+
+            if (details.IndexOf("database is locked", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "database is locked";
+            if (details.IndexOf("file is not a database", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "file is not a database";
+            if (details.IndexOf("unable to open database file", StringComparison.OrdinalIgnoreCase) >= 0)
+                return "unable to open database file";
+
+            return "other startup/database error";
         }
 
         private static IntPtr WaitForMainWindowHandle(Process process)

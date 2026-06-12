@@ -12,8 +12,6 @@ namespace SX3_SCANER.Model.Respository
     {
         public const string DatabaseFileName = "database.db";
         public const string ProductDatabaseFileName = "product.db";
-        private const string CompanyDirectoryName = "JBZVN";
-        private const string ProductDirectoryName = "SX3 Scanner";
         private const string LocalDataDirectoryName = "SX3_SCANER";
 
         public static string ApplicationDataDirectory
@@ -23,17 +21,6 @@ namespace SX3_SCANER.Model.Respository
                 return Path.Combine(
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     LocalDataDirectoryName);
-            }
-        }
-
-        private static string PreviousProgramDataDirectory
-        {
-            get
-            {
-                return Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
-                    CompanyDirectoryName,
-                    ProductDirectoryName);
             }
         }
 
@@ -90,7 +77,7 @@ namespace SX3_SCANER.Model.Respository
 
         public static SQLiteConnection CreateConnection()
         {
-            EnsureDatabaseFiles();
+            EnsureDatabaseFileExists(DatabaseFileName, DatabasePath);
 
             SQLiteConnection connection = null;
             try
@@ -112,14 +99,14 @@ namespace SX3_SCANER.Model.Respository
                 }
 
                 StartupManager.SetStatus("Lỗi database: không mở được database.db.");
-                StartupManager.Log("Loi mo database tai: " + DatabasePath + ". Chi tiet: " + ex);
+                StartupManager.LogStartupError(ex, DatabasePath);
                 throw;
             }
         }
 
         public static SQLiteConnection CreateProductConnection()
         {
-            EnsureDatabaseFiles();
+            EnsureDatabaseFileExists(ProductDatabaseFileName, ProductDatabasePath);
 
             SQLiteConnection connection = null;
             try
@@ -141,7 +128,7 @@ namespace SX3_SCANER.Model.Respository
                 }
 
                 StartupManager.SetStatus("Lỗi database: không mở được product.db.");
-                StartupManager.Log("Loi mo product database tai: " + ProductDatabasePath + ". Chi tiet: " + ex);
+                StartupManager.LogStartupError(ex, ProductDatabasePath);
                 throw;
             }
         }
@@ -154,67 +141,17 @@ namespace SX3_SCANER.Model.Respository
         public static void EnsureApplicationDataDirectory()
         {
             Directory.CreateDirectory(ApplicationDataDirectory);
-            RestoreMissingFilesFromPreviousProgramData();
             StartupManager.LogOnce("appdata-path", "AppData directory: " + ApplicationDataDirectory);
             StartupManager.LogOnce("main-db-path", "database.db path dang dung: " + DatabasePath);
             StartupManager.LogOnce("product-db-path", "product.db path dang dung: " + ProductDatabasePath);
-        }
-
-        private static void RestoreMissingFilesFromPreviousProgramData()
-        {
-            if (!Directory.Exists(PreviousProgramDataDirectory))
-            {
-                return;
-            }
-
-            RestoreDatabaseFamilyIfMissing(DatabaseFileName);
-            RestoreDatabaseFamilyIfMissing(ProductDatabaseFileName);
-        }
-
-        private static void RestoreDatabaseFamilyIfMissing(string databaseFileName)
-        {
-            string destinationDatabasePath =
-                Path.Combine(ApplicationDataDirectory, databaseFileName);
-
-            if (File.Exists(destinationDatabasePath))
-            {
-                StartupManager.LogOnce(
-                    "keep-local-data:" + databaseFileName,
-                    "Giu nguyen file du lieu hien co, khong ghi de: " +
-                    destinationDatabasePath);
-                return;
-            }
-
-            string sourceDatabasePath =
-                Path.Combine(PreviousProgramDataDirectory, databaseFileName);
-
-            if (!File.Exists(sourceDatabasePath))
-            {
-                return;
-            }
-
-            foreach (string suffix in new[] { string.Empty, "-wal", "-shm", "-journal" })
-            {
-                string fileName = databaseFileName + suffix;
-                string sourcePath = Path.Combine(PreviousProgramDataDirectory, fileName);
-                string destinationPath = Path.Combine(ApplicationDataDirectory, fileName);
-
-                if (File.Exists(sourcePath) && !File.Exists(destinationPath))
-                {
-                    File.Copy(sourcePath, destinationPath, overwrite: false);
-                    StartupManager.Log(
-                        "Da phuc hoi file con thieu tu ProgramData sang LocalAppData: " +
-                        sourcePath + " -> " + destinationPath);
-                }
-            }
         }
 
         public static void EnsureDatabaseFiles()
         {
             EnsureApplicationDataDirectory();
 
-            EnsureDatabaseFile(DatabaseFileName, DatabasePath);
-            EnsureDatabaseFile(ProductDatabaseFileName, ProductDatabasePath);
+            EnsureDatabaseFileExists(DatabaseFileName, DatabasePath);
+            EnsureDatabaseFileExists(ProductDatabaseFileName, ProductDatabasePath);
         }
 
         public static void ValidateDatabasePaths()
@@ -328,49 +265,25 @@ namespace SX3_SCANER.Model.Respository
             }
         }
 
-        private static bool EnsureDatabaseFile(string fileName, string destinationPath)
+        private static void EnsureDatabaseFileExists(string fileName, string databasePath)
         {
-            if (File.Exists(destinationPath))
+            EnsureApplicationDataDirectory();
+
+            if (File.Exists(databasePath))
             {
                 StartupManager.LogOnce(
                     string.Equals(fileName, DatabaseFileName, StringComparison.OrdinalIgnoreCase)
                         ? "main-db-exists"
                         : "product-db-exists",
                     fileName + " da ton tai trong AppData, dung file hien co va khong ghi de.");
-                return true;
+                return;
             }
 
-            string templatePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
-            if (!File.Exists(templatePath))
-            {
-                StartupManager.LogOnce(
-                    "database-template-missing:" + fileName,
-                    fileName + " chua co trong AppData va khong tim thay database mau tai: " + templatePath);
-                return false;
-            }
-
-            if (string.Equals(
-                Path.GetFullPath(templatePath),
-                Path.GetFullPath(destinationPath),
-                StringComparison.OrdinalIgnoreCase))
-            {
-                StartupManager.LogOnce(
-                    "database-template-same-path:" + fileName,
-                    fileName + " template va file dich trung nhau, khong copy: " + destinationPath);
-                return File.Exists(destinationPath);
-            }
-
-            try
-            {
-                File.Copy(templatePath, destinationPath, overwrite: false);
-                StartupManager.Log("Da copy " + fileName + " lan dau tu " + templatePath + " sang " + destinationPath);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                StartupManager.Log("Loi copy " + fileName + " lan dau tu " + templatePath + " sang " + destinationPath + ". Chi tiet: " + ex);
-                throw;
-            }
+            var exception = new FileNotFoundException(
+                "Khong tim thay database hien co. Ung dung se khong tu tao, reset hoac copy database mau.",
+                databasePath);
+            StartupManager.LogStartupError(exception, databasePath);
+            throw exception;
         }
 
         public static List<string> GetListTableName()

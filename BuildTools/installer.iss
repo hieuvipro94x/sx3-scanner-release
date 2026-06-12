@@ -65,8 +65,9 @@ Name: "{group}\SX3 Scanner"; Filename: "{app}{#MyAppExeName}"
 Name: "{commondesktop}\SX3 Scanner"; Filename: "{app}{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
+Filename: "{sys}\schtasks.exe"; Parameters: "/Create /F /TN ""SX3 Scanner"" /TR ""{app}\{#MyAppExeName}"" /SC ONLOGON /RL HIGHEST"; Flags: runhidden waituntilterminated
 Filename: "{app}\AnnouncementServer\SX3.AnnouncementServer.exe"; Flags: nowait skipifsilent
-Filename: "{app}{#MyAppExeName}"; Description: "Open SX3 Scanner"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "Open SX3 Scanner"; Flags: nowait postinstall skipifsilent
 
 [Code]
 const
@@ -97,9 +98,33 @@ begin
   end;
 end;
 
+procedure KillProcessByName(FileName: string);
+var
+  ResultCode: Integer;
+begin
+  Exec(
+    ExpandConstant('{sys}\taskkill.exe'),
+    '/F /IM "' + FileName + '"',
+    '',
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode);
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  KillProcessByName('SX3 SCANER.exe');
+  KillProcessByName('SX3.AnnouncementServer.exe');
+  Sleep(2000);
+  Result := True;
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   StopAnnouncementServer;
+  KillProcessByName('SX3 SCANER.exe');
+  KillProcessByName('SX3.AnnouncementServer.exe');
+  Sleep(2000);
   Result := '';
 end;
 
